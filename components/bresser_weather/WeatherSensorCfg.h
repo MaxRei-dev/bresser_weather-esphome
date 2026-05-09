@@ -46,7 +46,7 @@
 // ------------------------------------------------------------------------------------------------
 // --- Weather Sensors ---
 // ------------------------------------------------------------------------------------------------
-#define MAX_SENSORS_DEFAULT 1       // Maximum number of sensors to be received
+#define MAX_SENSORS_DEFAULT 2       // Maximum number of sensors to be received
 
 // List of sensor IDs to be excluded - can be empty
 //#define SENSOR_IDS_EXC { 0x792882A2 }
