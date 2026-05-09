@@ -22,34 +22,45 @@ from esphome.core import CORE
 
 AUTO_LOAD = ["sensor", "binary_sensor", "text_sensor"]
 
-CONF_WIND_GUST = "wind_gust"
-CONF_WIND_SPEED = "wind_speed"
-CONF_WIND_DIRECTION = "wind_direction"
-CONF_RAIN = "rain"
-CONF_UV = "uv"
-CONF_LIGHT = "light"
-CONF_RSSI = "rssi"
-CONF_BATTERY_OK = "battery_ok"
-CONF_SENSOR_ID = "sensor_id"
-CONF_FILTER_SENSOR_ID = "filter_sensor_id"
-CONF_RADIO = "radio"
-CONF_PINS = "pins"
-CONF_CS_PIN = "cs"
+# ── Weather station config keys ───────────────────────────────────────────────
+CONF_WIND_GUST         = "wind_gust"
+CONF_WIND_SPEED        = "wind_speed"
+CONF_WIND_DIRECTION    = "wind_direction"
+CONF_RAIN              = "rain"
+CONF_UV                = "uv"
+CONF_LIGHT             = "light"
+CONF_RSSI              = "rssi"
+CONF_BATTERY_OK        = "battery_ok"
+CONF_SENSOR_ID         = "sensor_id"
+CONF_FILTER_SENSOR_ID  = "filter_sensor_id"
+
+# ── Pool thermometer config keys ──────────────────────────────────────────────
+CONF_WATER_TEMPERATURE      = "water_temperature"
+CONF_POOL_RSSI              = "pool_rssi"
+CONF_POOL_BATTERY_OK        = "pool_battery_ok"
+CONF_POOL_SENSOR_ID         = "pool_sensor_id"
+CONF_FILTER_POOL_SENSOR_ID  = "filter_pool_sensor_id"
+
+# ── Radio / pin config keys ───────────────────────────────────────────────────
+CONF_RADIO   = "radio"
+CONF_PINS    = "pins"
+CONF_CS_PIN  = "cs"
 CONF_IRQ_PIN = "irq"
 CONF_GPIO_PIN = "gpio"
-CONF_RST_PIN = "rst"
+CONF_RST_PIN  = "rst"
 
-# Custom units not in const
+# ── Custom units (not yet in esphome.const for all ESPHome versions) ──────────
 UNIT_METER_PER_SECOND = "m/s"
-UNIT_MILLIMETER = "mm"
-UNIT_DEGREES = "°"
-UNIT_KILOLUX = "klx"
-UNIT_DBM = "dBm"
+UNIT_MILLIMETER       = "mm"
+UNIT_DEGREES          = "°"
+UNIT_KILOLUX          = "klx"
+UNIT_DBM              = "dBm"
 
-bresser_weather_ns = cg.esphome_ns.namespace("bresser_weather")
+# ── C++ class references ──────────────────────────────────────────────────────
+bresser_weather_ns      = cg.esphome_ns.namespace("bresser_weather")
 BresserWeatherComponent = bresser_weather_ns.class_("BresserWeatherComponent", cg.Component)
-WeatherData = bresser_weather_ns.struct("WeatherData")
-WeatherDataTrigger = bresser_weather_ns.class_(
+WeatherData             = bresser_weather_ns.struct("WeatherData")
+WeatherDataTrigger      = bresser_weather_ns.class_(
     "WeatherDataTrigger", automation.Trigger.template(WeatherData)
 )
 
@@ -63,10 +74,12 @@ RADIO_TYPES = {
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(BresserWeatherComponent),
+
+        # ── Radio hardware ────────────────────────────────────────────────────
         cv.Required(CONF_RADIO): cv.one_of(*RADIO_TYPES, lower=True),
         cv.Required(CONF_PINS): cv.Schema(
             {
-                cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
+                cv.Required(CONF_CS_PIN):  pins.internal_gpio_output_pin_number,
                 cv.Required(CONF_IRQ_PIN): pins.internal_gpio_input_pin_number,
                 cv.Required(CONF_GPIO_PIN): pins.internal_gpio_input_pin_number,
                 cv.Required(CONF_RST_PIN): cv.Any(
@@ -75,6 +88,8 @@ CONFIG_SCHEMA = cv.Schema(
                 ),
             }
         ),
+
+        # ── Weather station sensors ───────────────────────────────────────────
         cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
@@ -127,6 +142,27 @@ CONFIG_SCHEMA = cv.Schema(
         ),
         cv.Optional(CONF_SENSOR_ID): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_FILTER_SENSOR_ID): cv.hex_uint32_t,
+
+        # ── Pool / Spa Thermometer sensors (PN 7000073) ───────────────────────
+        cv.Optional(CONF_WATER_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_POOL_RSSI): sensor.sensor_schema(
+            unit_of_measurement=UNIT_DBM,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_SIGNAL_STRENGTH,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_POOL_BATTERY_OK): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_BATTERY,
+        ),
+        cv.Optional(CONF_POOL_SENSOR_ID): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_FILTER_POOL_SENSOR_ID): cv.hex_uint32_t,
+
+        # ── Automation trigger ────────────────────────────────────────────────
         cv.Optional(CONF_ON_VALUE): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WeatherDataTrigger),
@@ -135,6 +171,7 @@ CONFIG_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
+
 async def to_code(config):
 
     script_path = os.path.join(os.path.dirname(__file__), "pre_build.py")
@@ -142,12 +179,12 @@ async def to_code(config):
 
     if CORE.is_esp8266:
         from esphome.components.esp8266.const import require_waveform
-
         require_waveform()
-    
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
+    # ── Weather station sensors ───────────────────────────────────────────────
     if CONF_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_TEMPERATURE])
         cg.add(var.set_temperature_sensor(sens))
@@ -195,18 +232,41 @@ async def to_code(config):
     if CONF_FILTER_SENSOR_ID in config:
         cg.add(var.set_filter_sensor_id(config[CONF_FILTER_SENSOR_ID]))
 
+    # ── Pool / Spa Thermometer sensors ────────────────────────────────────────
+    if CONF_WATER_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_WATER_TEMPERATURE])
+        cg.add(var.set_water_temperature_sensor(sens))
+
+    if CONF_POOL_RSSI in config:
+        sens = await sensor.new_sensor(config[CONF_POOL_RSSI])
+        cg.add(var.set_pool_rssi_sensor(sens))
+
+    if CONF_POOL_BATTERY_OK in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_POOL_BATTERY_OK])
+        cg.add(var.set_pool_battery_sensor(sens))
+
+    if CONF_POOL_SENSOR_ID in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_POOL_SENSOR_ID])
+        cg.add(var.set_pool_sensor_id_text_sensor(sens))
+
+    if CONF_FILTER_POOL_SENSOR_ID in config:
+        cg.add(var.set_filter_pool_sensor_id(config[CONF_FILTER_POOL_SENSOR_ID]))
+
+    # ── Automation trigger ────────────────────────────────────────────────────
     for conf in config.get(CONF_ON_VALUE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(WeatherData, "x")], conf)
 
-    # Add library dependencies
+    # ── Library dependencies ──────────────────────────────────────────────────
     cg.add_platformio_option("lib_deps", ["matthias-bs/BresserWeatherSensorReceiver@0.39.3"])
     cg.add_platformio_option("lib_deps", ["jgromes/RadioLib@7.6.0"])
     cg.add_platformio_option("lib_deps", ["vshymanskyy/Preferences@2.2.2"])
     cg.add_platformio_option("lib_deps", ["bblanchon/ArduinoJson@7.4.3"])
-    # Add build flags for selected radio and pins
+
+    # ── Build flags: radio chip + receiver pins ───────────────────────────────
     radio_define = RADIO_TYPES[config[CONF_RADIO]]
     cg.add_build_flag(f"-DUSE_{radio_define}")
+
     pin_config = config[CONF_PINS]
     cg.add_build_flag(f"-DPIN_RECEIVER_CS={pin_config[CONF_CS_PIN]}")
     cg.add_build_flag(f"-DPIN_RECEIVER_IRQ={pin_config[CONF_IRQ_PIN]}")
