@@ -9,11 +9,41 @@
 #include "WeatherSensorCfg.h"
 #include "WeatherSensor.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Safety fallback: SENSOR_TYPE_POOL_THERMO was added to WeatherSensor.h on
-// 20231024. If an older library copy is installed the define would be missing.
+// 20231024. Older library copies may not have it.
+// ─────────────────────────────────────────────────────────────────────────────
 #ifndef SENSOR_TYPE_POOL_THERMO
 #define SENSOR_TYPE_POOL_THERMO 3
 #endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Debug / frame-loss statistics
+//
+// BRESSER_DEBUG_STATS controls whether frame counters and periodic summary
+// logging are compiled in.
+//
+//   Enabled  (default): define BRESSER_DEBUG_STATS 1
+//   Disabled           : define BRESSER_DEBUG_STATS 0
+//
+// Override in your ESPHome YAML:
+//   esphome:
+//     build_flags:
+//       - "-DBRESSER_DEBUG_STATS=0"   # disable
+//       - "-DBRESSER_DEBUG_STATS=1"   # enable  (default)
+//
+// When enabled, a stats summary is logged at INFO level every
+// BRESSER_STATS_INTERVAL_MS milliseconds (default: 60 s).
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef BRESSER_DEBUG_STATS
+#define BRESSER_DEBUG_STATS 1
+#endif
+
+#if BRESSER_DEBUG_STATS
+#ifndef BRESSER_STATS_INTERVAL_MS
+#define BRESSER_STATS_INTERVAL_MS 60000U   // 60 s – change freely
+#endif
+#endif // BRESSER_DEBUG_STATS
 
 namespace esphome
 {
@@ -21,7 +51,7 @@ namespace esphome
     {
         struct WeatherData
         {
-            // ---- Weather station fields ----
+            // ── Weather station ──────────────────────────────────────────────
             std::string sensor_id;
             float rssi;
             bool battery_ok;
@@ -40,9 +70,9 @@ namespace esphome
             float light;
             bool light_ok;
 
-            // ---- Pool / Spa Thermometer (3-in-1, PN 7000073) ----
+            // ── Pool / Spa Thermometer (3-in-1, PN 7000073) ─────────────────
             // pool_valid is true only in frames that carry pool data.
-            // In those frames the weather fields above are set to NAN / false.
+            // In those frames the weather fields above are NAN / false.
             bool pool_valid{false};
             std::string pool_sensor_id;
             float pool_rssi{NAN};
@@ -58,7 +88,7 @@ namespace esphome
             void loop() override;
             float get_setup_priority() const override { return setup_priority::DATA; }
 
-            // ---- Weather station sensors ----
+            // ── Weather station sensors ──────────────────────────────────────
             void set_temperature_sensor(sensor::Sensor *s)             { temperature_sensor_ = s; }
             void set_humidity_sensor(sensor::Sensor *s)                { humidity_sensor_ = s; }
             void set_wind_gust_sensor(sensor::Sensor *s)               { wind_gust_sensor_ = s; }
@@ -71,13 +101,13 @@ namespace esphome
             void set_battery_sensor(binary_sensor::BinarySensor *s)    { battery_sensor_ = s; }
             void set_sensor_id_text_sensor(text_sensor::TextSensor *s) { sensor_id_sensor_ = s; }
 
-            // ---- Pool thermometer sensors ----
+            // ── Pool thermometer sensors ─────────────────────────────────────
             void set_water_temperature_sensor(sensor::Sensor *s)            { water_temperature_sensor_ = s; }
             void set_pool_rssi_sensor(sensor::Sensor *s)                     { pool_rssi_sensor_ = s; }
             void set_pool_battery_sensor(binary_sensor::BinarySensor *s)    { pool_battery_sensor_ = s; }
             void set_pool_sensor_id_text_sensor(text_sensor::TextSensor *s) { pool_sensor_id_sensor_ = s; }
 
-            // ---- Filters ----
+            // ── Filters ─────────────────────────────────────────────────────
             void set_filter_sensor_id(uint32_t id)
             {
                 filter_sensor_id_ = id;
@@ -97,15 +127,15 @@ namespace esphome
         protected:
             WeatherSensor ws_;
 
-            // ---- Weather station filter ----
+            // ── Weather station filter ───────────────────────────────────────
             uint32_t filter_sensor_id_{0};
             bool     filter_enabled_{false};
 
-            // ---- Pool sensor filter ----
+            // ── Pool sensor filter ───────────────────────────────────────────
             uint32_t filter_pool_sensor_id_{0};
             bool     filter_pool_enabled_{false};
 
-            // ---- Weather station sensor pointers ----
+            // ── Weather station sensor pointers ─────────────────────────────
             sensor::Sensor *temperature_sensor_{nullptr};
             sensor::Sensor *humidity_sensor_{nullptr};
             sensor::Sensor *wind_gust_sensor_{nullptr};
@@ -118,11 +148,24 @@ namespace esphome
             binary_sensor::BinarySensor *battery_sensor_{nullptr};
             text_sensor::TextSensor     *sensor_id_sensor_{nullptr};
 
-            // ---- Pool thermometer sensor pointers ----
+            // ── Pool thermometer sensor pointers ─────────────────────────────
             sensor::Sensor *water_temperature_sensor_{nullptr};
             sensor::Sensor *pool_rssi_sensor_{nullptr};
             binary_sensor::BinarySensor *pool_battery_sensor_{nullptr};
             text_sensor::TextSensor     *pool_sensor_id_sensor_{nullptr};
+
+            // ── Debug / frame-loss counters ──────────────────────────────────
+            // Compiled out entirely when BRESSER_DEBUG_STATS=0.
+#if BRESSER_DEBUG_STATS
+            uint32_t dbg_ok_{0};        // frames successfully decoded
+            uint32_t dbg_invalid_{0};   // frames received but CRC/decode failed
+            uint32_t dbg_timeout_{0};   // getMessage() returned without a frame
+            uint32_t dbg_weather_{0};   // weather-station frames processed
+            uint32_t dbg_pool_{0};      // pool-thermometer frames processed
+            uint32_t dbg_filtered_{0};  // frames dropped by sensor-ID filter
+            uint32_t dbg_unknown_{0};   // frames with unhandled sensor type
+            uint32_t dbg_last_stats_ms_{0};
+#endif
 
             CallbackManager<void(const WeatherData &)> data_callback_;
         };
