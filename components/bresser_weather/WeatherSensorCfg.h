@@ -1,9 +1,13 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-// WeatherSensorCfg.h  –  MODIFIED FOR POOL SENSOR SUPPORT
+// WeatherSensorCfg.h
 //
-// Änderung gegenüber Original:
-//   MAX_SENSORS_DEFAULT  1  →  2    (Wetterstation + Pool-Thermometer)
-//   SENSOR_IDS_EXC            prüfen ob 0x792882A2 zufällig das Pool-Thermometer ist!
+// Bresser 5-in-1/6-in-1/7-in-1 868 MHz Weather Sensor Radio Receiver
+// based on CC1101 and ESP32
+//
+// https://github.com/matthias-bs/BresserWeatherSensorReceiver
+//
+// NOTE: This file overrides the one shipped with the library.
+//       It is copied into the library folder during build by pre_build.py
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #if !defined(WEATHER_SENSOR_CFG_H)
@@ -29,7 +33,6 @@
 
 // Disable data type which will not be used to save RAM
 #define WIND_DATA_FLOATINGPOINT
-#define WIND_DATA_FIXEDPOINT
 
 // Select appropriate sensor message format(s)
 // BRESSER_6_IN_1 ist zwingend erforderlich für das Pool-Thermometer PN 7000073!

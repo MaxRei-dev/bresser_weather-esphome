@@ -20,7 +20,7 @@ spi:
   mosi_pin: GPIO23
 
 external_components:
-  - source: github://MaxRei-dev/bresser_weather-esphome@poolsensor
+  - source: github://MaxRei-dev/bresser_weather-esphome@main
     refresh: 0s
     components: [bresser_weather]
 
@@ -64,7 +64,6 @@ bresser_weather:
     gpio: 33 # D1 (GD2)
     rst: -1 # RADIOLIB_NC
 
-#filter_sensor_id: 0x00001F11  # Replace with your sensor ID00008BFC
   filter_sensor_id: 0x00008BFC
   filter_pool_sensor_id: 0x27761309
 
@@ -139,3 +138,12 @@ bresser_weather:
   pool_sensor_id:
     name: "${friendly_name} Pool Sensor ID"
     entity_category: "diagnostic"
+
+  on_value:
+    then:
+      - lambda: |-
+          if (x.pool_valid) {
+            ESP_LOGI("weather", "Pool %s: %.1f°C", x.pool_sensor_id.c_str(), x.water_temperature);
+          } else {
+            ESP_LOGI("weather", "WS %s: %.1f°C", x.sensor_id.c_str(), x.temperature);
+          }

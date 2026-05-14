@@ -177,10 +177,6 @@ async def to_code(config):
     script_path = os.path.join(os.path.dirname(__file__), "pre_build.py")
     cg.add_platformio_option("extra_scripts", [f"pre:{script_path}"])
 
-    if CORE.is_esp8266:
-        from esphome.components.esp8266.const import require_waveform
-        require_waveform()
-
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 

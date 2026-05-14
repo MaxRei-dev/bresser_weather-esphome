@@ -42,6 +42,7 @@ This project is made possible by the excellent [BresserWeatherSensorReceiver](ht
 ```yaml
 external_components:
   - source: github://MaxRei-dev/bresser_weather-esphome@main
+    refresh: 0s
     components: [bresser_weather]
 ```
 
