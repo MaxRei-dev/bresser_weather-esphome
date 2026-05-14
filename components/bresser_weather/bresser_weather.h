@@ -18,6 +18,17 @@
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Safety fallback: DECODE_TIMEOUT was added to the library's DecodeStatus
+// enum at a later point. If the installed version only knows DECODE_OK and
+// DECODE_INVALID, map DECODE_TIMEOUT to DECODE_INVALID so the .cpp compiles.
+// Effect: on older libraries the debug counter dbg_timeout_ stays at 0 and
+// timeouts are counted as dbg_invalid_ instead – functionally correct.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef DECODE_TIMEOUT
+#define DECODE_TIMEOUT DECODE_INVALID
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Debug / frame-loss statistics
 //
 // BRESSER_DEBUG_STATS controls whether frame counters and periodic summary
