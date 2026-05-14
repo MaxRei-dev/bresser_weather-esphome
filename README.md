@@ -1,259 +1,313 @@
 # ESPHome Bresser Weather Sensor Component
 
-Minimal ESPHome component for Bresser weather sensors with configurable receiver.
+ESPHome component for Bresser weather sensors and the Bresser Pool / Spa Thermometer (PN 7000073) using a CC1101 868 MHz radio module.
 
-This is a side-code project made possible entirely by the excellent [BresserWeatherSensorReceiver](https://github.com/matthias-bs/BresserWeatherSensorReceiver/tree/main) library by Matthias Prinke. All credit for the sensor decoding and radio communication goes to that project.
+This project is made possible by the excellent [BresserWeatherSensorReceiver](https://github.com/matthias-bs/BresserWeatherSensorReceiver/tree/main) library by Matthias Prinke. All credit for sensor decoding and radio communication belongs to that project.
 
-> **Disclaimer**: This project was **developed with AI assistance**, but has been tested with the hardware configuration listed below.
+> **Disclaimer**: Developed with AI assistance, tested with the hardware configurations listed below.
 
 ## Tested Hardware
 
-This component has been tested with:
-
-- **Microcontroller**: Wemos D1 Mini (ESP8266)
-- **Radio Module**: CC1101 868MHz
-- **Weather Sensor**: Bresser 7-in-1 (Model 7003100)
-
-And:
-
-- **Microcontroller**: Wemos D1 Mini (ESP8266)
-- **Radio Module**: SX1262 900MHz
-- **Weather Sensor**: Bresser 5-in-1 (Model 7002510)
-
-Other combinations may work but are untested.
+| Microcontroller | Radio Module   | Sensor                                      |
+| --------------- | -------------- | ------------------------------------------- |
+| ESP32           | CC1101 868 MHz | Bresser 7-in-1 (7003100)                    |
+| ESP32           | CC1101 868 MHz | Bresser 7-in-1 + Pool Thermometer (7000073) |
 
 ## Features
 
 - Direct Home Assistant integration via ESPHome API
-- Sensor readings: Temperature, Humidity, Wind (speed/gust/direction), Rain, UV, Light
-- Low memory footprint - fits on ESP8266
+- Weather station: Temperature, Humidity, Wind (speed / gust / direction), Rain, UV, Light
+- Pool / Spa Thermometer support (Bresser PN 7000073)
+- Per-sensor ID filtering (`filter_sensor_id`, `filter_pool_sensor_id`)
+- `on_value` automation trigger with full `WeatherData` struct
+- Non-blocking loop — compatible with all other ESPHome components
 
-## Potentially Compatible Hardware
+## Wiring (ESP32 + CC1101)
 
-The underlying library supports **various configurations**. Untested combinations include:
+| CC1101 | ESP32 | GPIO |
+| ------ | ----- | ---- |
+| VCC    | 3.3V  | —    |
+| GND    | GND   | —    |
+| SCLK   | —     | 18   |
+| MISO   | —     | 19   |
+| MOSI   | —     | 23   |
+| CS     | —     | 27   |
+| GD0    | —     | 21   |
+| GD2    | —     | 33   |
 
-### Weather Sensors
-
-- Bresser 5-in-1
-- Bresser 6-in-1
-- Other Bresser models
-
-### Radio Modules
-
-- SX1276/RFM95W
-- SX1262
-- LR1121
-- CC1101
-
-### Microcontrollers
-
-- ESP32 variants
-- Other ESP8266 boards
-
-## Wiring Example
-
-**D1 Mini + CC1101:**
-
-| CC1101 | D1 Mini | GPIO |
-| ------ | ------- | ---- |
-| VCC    | 3.3V    | -    |
-| GND    | GND     | -    |
-| SCLK   | D5      | 14   |
-| MISO   | D6      | 12   |
-| MOSI   | D7      | 13   |
-| CS     | D8      | 15   |
-| GD0    | D2      | 4    |
-| GD2    | D1      | 5    |
-
-⚠️ **Important**: CC1101 requires **3.3V** not 5V!
+> **Important**: CC1101 requires **3.3V** — not 5V.
 
 ## Installation
 
-### Option 1: Use from GitHub (Recommended)
-
 ```yaml
 external_components:
-  - source: github://exetico/bresser_weather-esphome@main
+  - source: github://MaxRei-dev/bresser_weather-esphome@main
+    refresh: 0s
     components: [bresser_weather]
-```
-
-### Option 2: Local Development
-
-```yaml
-external_components:
-  - source:
-      type: local
-      path: components
 ```
 
 ## Configuration
 
-This version requires explicit radio selection and pin configuration in YAML.
+### Required options
 
-### Required Options
+| Key         | Description                                    |
+| ----------- | ---------------------------------------------- |
+| `radio`     | Radio chip — use `cc1101`                      |
+| `pins.cs`   | SPI chip select GPIO                           |
+| `pins.irq`  | Interrupt / GD0 GPIO                           |
+| `pins.gpio` | GD2 GPIO                                       |
+| `pins.rst`  | Reset GPIO — use `-1` if not connected         |
 
-- `radio`: one of `cc1101`, `sx1262`, `sx1276`, `lr1121`
-- `pins`: receiver pin mapping (`cs`, `irq`, `gpio`, `rst`). Use `rst: -1` for not connected.
-
-### Minimal Example
+### Full example
 
 ```yaml
 substitutions:
-  device_name: bresser-weather
-  friendly_name: Bresser Weather
+  friendly_name: "Weather Station"
 
 esphome:
-  name: ${device_name}
+  name: wetterstation
+  friendly_name: ${friendly_name}
+  libraries:
+    - SPI
 
-esp8266:
-  board: d1_mini
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+    version: 3.3.6
+    advanced:
+      minimum_chip_revision: "3.0"
 
-# Required: SPI configuration for radio module
 spi:
-  clk_pin: GPIO14 # D5
-  miso_pin: GPIO12 # D6
-  mosi_pin: GPIO13 # D7
+  clk_pin: GPIO18
+  miso_pin: GPIO19
+  mosi_pin: GPIO23
 
-# External component
 external_components:
-  - source: github://exetico/bresser_weather-esphome@main
+  - source: github://MaxRei-dev/bresser_weather-esphome@main
     components: [bresser_weather]
+
+logger:
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
 
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-api:
-logger:
-ota:
+sensor:
+  - platform: internal_temperature
+    name: "${friendly_name} Internal Temperature"
 
-# Bresser Weather Component
+button:
+  - platform: restart
+    name: "${friendly_name} Restart"
+
 bresser_weather:
   radio: cc1101
   pins:
-    cs: 15 # D8
-    irq: 4 # D2 (GD0)
-    gpio: 5 # D1 (GD2)
-    rst: -1 # RADIOLIB_NC
-  filter_sensor_id: 0x00001F11 # Only accept data from this sensor ID
+    cs: 27
+    irq: 21
+    gpio: 33
+    rst: -1
+  filter_sensor_id: 0x00008BFC       # replace with your weather station ID
+  filter_pool_sensor_id: 0x27761309  # replace with your pool sensor ID
+
+  # Weather station
   temperature:
     name: "${friendly_name} Temperature"
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: "°C"
   humidity:
     name: "${friendly_name} Humidity"
+    device_class: humidity
+    state_class: measurement
+    unit_of_measurement: "%"
   wind_gust:
     name: "${friendly_name} Wind Gust"
+    state_class: measurement
+    unit_of_measurement: "m/s"
   wind_speed:
     name: "${friendly_name} Wind Speed"
+    device_class: wind_speed
+    state_class: measurement
+    unit_of_measurement: "m/s"
   wind_direction:
     name: "${friendly_name} Wind Direction"
+    device_class: wind_direction
+    unit_of_measurement: "°"
   rain:
     name: "${friendly_name} Rain"
+    device_class: precipitation
+    state_class: total_increasing
+    unit_of_measurement: "mm"
   uv:
     name: "${friendly_name} UV Index"
+    state_class: measurement
   light:
     name: "${friendly_name} Light"
+    device_class: illuminance
+    state_class: measurement
+    unit_of_measurement: "lx"
+    filters:
+      - multiply: 1000  # convert klx to lx
   rssi:
     name: "${friendly_name} RSSI"
+    device_class: signal_strength
+    state_class: measurement
+    unit_of_measurement: "dBm"
+    entity_category: diagnostic
   battery_ok:
-    name: "${friendly_name} Battery OK"
+    name: "${friendly_name} Battery"
+    device_class: battery
+    entity_category: diagnostic
   sensor_id:
     name: "${friendly_name} Sensor ID"
+    entity_category: diagnostic
+
+  # Pool / Spa Thermometer (PN 7000073)
+  water_temperature:
+    name: "${friendly_name} Pool Temperature"
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: "°C"
+  pool_rssi:
+    name: "${friendly_name} Pool RSSI"
+    device_class: signal_strength
+    state_class: measurement
+    unit_of_measurement: "dBm"
+    entity_category: diagnostic
+  pool_battery_ok:
+    name: "${friendly_name} Pool Battery"
+    device_class: battery
+    entity_category: diagnostic
+  pool_sensor_id:
+    name: "${friendly_name} Pool Sensor ID"
+    entity_category: diagnostic
 ```
 
-### Complete Examples
+### `on_value` automation trigger
 
-- [example.yaml](example.yaml) - Full configuration using GitHub source (after publishing)
-- [local_development.yaml](local_development.yaml) - Local development configuration
+Fires on every successfully decoded frame. Use `x.pool_valid` to distinguish weather station from pool sensor frames.
 
-## Home Assistant Integration
+```yaml
+bresser_weather:
+  # ...
+  on_value:
+    then:
+      - lambda: |-
+          if (x.pool_valid) {
+            // Pool thermometer frame
+            // x.pool_sensor_id       (std::string)
+            // x.pool_rssi            (float, dBm)
+            // x.pool_battery_ok      (bool)
+            // x.water_temperature    (float, °C)  – check x.water_temperature_ok
+            ESP_LOGI("weather", "Pool %s: %.1f°C", x.pool_sensor_id.c_str(), x.water_temperature);
+          } else {
+            // Weather station frame
+            // x.sensor_id            (std::string, e.g. "00008BFC")
+            // x.rssi                 (float, dBm)
+            // x.battery_ok           (bool)
+            // x.temperature          (float, °C)   – check x.temperature_ok
+            // x.humidity             (float, %)    – check x.humidity_ok
+            // x.wind_gust            (float, m/s)  – check x.wind_ok
+            // x.wind_speed           (float, m/s)  – check x.wind_ok
+            // x.wind_direction       (float, °)    – check x.wind_ok
+            // x.rain                 (float, mm)   – check x.rain_ok
+            // x.uv                   (float)       – check x.uv_ok
+            // x.light                (float, klx)  – check x.light_ok
+            ESP_LOGI("weather", "WS %s: %.1f°C", x.sensor_id.c_str(), x.temperature);
+          }
+```
 
-Once configured and uploaded, the device will automatically appear in Home Assistant via the ESPHome integration. All sensors will be created with proper device classes for optimal dashboard display.
+## Available Sensors
 
-### Available Sensors
+### Weather Station
 
-| Sensor         | Unit | Device Class    |
-| -------------- | ---- | --------------- |
-| Temperature    | °C   | temperature     |
-| Humidity       | %    | humidity        |
-| Wind Gust      | m/s  | wind_speed      |
-| Wind Speed     | m/s  | wind_speed      |
-| Wind Direction | °    | -               |
-| Rain           | mm   | precipitation   |
-| UV Index       | -    | -               |
-| Light          | klx  | illuminance     |
-| RSSI           | dBm  | signal_strength |
-| Battery OK     | -    | battery         |
-| Sensor ID      | -    | diagnostic      |
+| Sensor           | Unit | Device Class    | Notes                         |
+| ---------------- | ---- | --------------- | ----------------------------- |
+| `temperature`    | °C   | temperature     |                               |
+| `humidity`       | %    | humidity        |                               |
+| `wind_speed`     | m/s  | wind_speed      |                               |
+| `wind_gust`      | m/s  | —               |                               |
+| `wind_direction` | °    | wind_direction  |                               |
+| `rain`           | mm   | precipitation   | state_class: total_increasing |
+| `uv`             | —    | —               |                               |
+| `light`          | klx  | illuminance     | multiply 1000 for lx          |
+| `rssi`           | dBm  | signal_strength | diagnostic                    |
+| `battery_ok`     | —    | battery         | ON = battery low, diagnostic  |
+| `sensor_id`      | —    | —               | diagnostic                    |
+
+### Pool / Spa Thermometer (PN 7000073)
+
+| Sensor              | Unit | Device Class    |            |
+| ------------------- | ---- | --------------- | ---------- |
+| `water_temperature` | °C   | temperature     |            |
+| `pool_rssi`         | dBm  | signal_strength | diagnostic |
+| `pool_battery_ok`   | —    | battery         | diagnostic |
+| `pool_sensor_id`    | —    | —               | diagnostic |
+
+## Finding Your Sensor ID
+
+Enable DEBUG logging and watch the output after the device starts. The sensor ID appears on every received frame:
+
+```
+[bresser_weather] [Weather] ID=00008BFC T=21.3°C ...
+[bresser_weather] [Pool]    ID=27761309 WaterTemp=24.1°C ...
+```
+
+Use the logged ID as `filter_sensor_id` / `filter_pool_sensor_id` to ignore nearby Bresser sensors you don't own.
 
 ## Data Update Frequency
 
-The Bresser 7-in-1 sensor transmits approximately every 48 seconds. The component listens continuously and updates Home Assistant immediately when new data is received.
+Bresser sensors transmit approximately every 48 seconds. The component listens continuously and updates Home Assistant immediately on reception.
 
 ## Troubleshooting
 
-### No sensor data received
+### No data received
 
-1. Check wiring - especially 3.3V power and all SPI connections
-2. Verify radio module wiring and power
-3. Check sensor battery - replace if low
-4. Enable DEBUG logging:
+1. Check wiring — especially 3.3V power and all SPI connections.
+2. Remove `filter_sensor_id` temporarily to receive from any sensor.
+3. Enable DEBUG logging:
    ```yaml
    logger:
      level: DEBUG
    ```
-5. Check sensor range - typically ~100m outdoors
-6. Enable BresserWeatherSensorReceiver and RadioLib logging:
+4. Enable low-level radio and library logging:
    ```yaml
    esphome:
      platformio_options:
        build_flags:
          - -DCORE_DEBUG_LEVEL=ARDUHAL_LOG_LEVEL_VERBOSE
-          - -DRADIOLIB_DEBUG_BASIC
-          - -DRADIOLIB_DEBUG_PROTOCOL
-          - -DRADIOLIB_DEBUG_SPI
+         - -DRADIOLIB_DEBUG_BASIC
+         - -DRADIOLIB_DEBUG_PROTOCOL
    ```
 
-### Local Development Setup
+### Disable frame-loss statistics
 
-For local development and testing:
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-Then use [local_development.yaml](local_development.yaml) as your configuration file.
-
-#### ESPHome Commands for local development
-
-```bash
-# Validate config
-esphome config bresser_weather.yaml
-
-# Compile (without uploading)
-esphome compile bresser_weather.yaml
-
-# Upload to ESP8266 (finds USB port automatically)
-esphome upload bresser_weather.yaml
-
-# Or upload + monitor logs
-esphome run bresser_weather.yaml
-```
-
-### Memory issues
-
-Disable the web server to save memory:
+The component logs a frame-loss summary every 60 seconds at INFO level. To disable:
 
 ```yaml
-# web_server:  # Remove this
-#   port: 80
+esphome:
+  platformio_options:
+    build_flags:
+      - -DBRESSER_DEBUG_STATS=0
 ```
 
 ## Credits
 
-This component is only possible thanks to the [BresserWeatherSensorReceiver](https://github.com/matthias-bs/BresserWeatherSensorReceiver/tree/main) library by Matthias Prinke. All the heavy lifting of sensor decoding and radio communication is done by that library.
+All sensor decoding and radio communication is handled by the [BresserWeatherSensorReceiver](https://github.com/matthias-bs/BresserWeatherSensorReceiver/tree/main) library by Matthias Prinke.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
