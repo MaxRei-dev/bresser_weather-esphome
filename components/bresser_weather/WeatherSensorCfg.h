@@ -19,10 +19,7 @@
 #define MAX_SENSORS_DEFAULT 2
 
 // List of sensor IDs to be excluded - can be empty
-// ACHTUNG: Prüfe ob 0x792882A2 dein Pool-Thermometer ist!
-// Die ID steht im Log beim ersten Empfang, oder auf dem Sensorgehäuse.
-// Falls es das Pool-Thermometer ist → aus der Liste entfernen.
-#define SENSOR_IDS_EXC { 0x792882A2 }
+#define SENSOR_IDS_EXC { }
 
 // List of sensor IDs to be included - if empty, handle all available sensors
 #define SENSOR_IDS_INC { }
