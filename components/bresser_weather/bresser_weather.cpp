@@ -176,9 +176,6 @@ namespace esphome
             }
 #endif
 
-            if (this->data_queue_ == nullptr)
-                return;
-
             // ── Queue vollständig leeren ──────────────────────────────────────
             // Alle seit dem letzten loop()-Aufruf empfangenen Frames verarbeiten.
             RawFrame frame{};
