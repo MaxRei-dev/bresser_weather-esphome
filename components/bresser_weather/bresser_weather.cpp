@@ -71,8 +71,7 @@ namespace esphome
 #if BRESSER_DEBUG_STATS
                     self->dbg_timeout_++;
 #endif
-                    // Kein Delay – sofort nächster Versuch.
-                    // FreeRTOS-Scheduler gibt anderen Tasks trotzdem CPU.
+                    vTaskDelay(pdMS_TO_TICKS(10));
                     continue;
                 }
 

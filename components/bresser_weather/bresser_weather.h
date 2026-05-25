@@ -56,7 +56,7 @@
 #define RF_TASK_PRIORITY 2          // Unter WiFi (23), über Idle (0)
 #endif
 #ifndef RF_TASK_STACK
-#define RF_TASK_STACK    4096       // Bytes
+#define RF_TASK_STACK    8192       // Bytes – RadioLib + Frame-Decoding braucht >4096
 #endif
 #ifndef RF_QUEUE_DEPTH
 #define RF_QUEUE_DEPTH   8          // Frames die gepuffert werden können
