@@ -1,131 +1,206 @@
 #include "bresser_weather.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
 namespace esphome
 {
     namespace bresser_weather
     {
-
         static const char *const TAG = "bresser_weather";
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
+        // setup()  –  läuft auf Core 1 (ESPHome-Loop)
+        // ═════════════════════════════════════════════════════════════════════
         void BresserWeatherComponent::setup()
         {
             ESP_LOGI(TAG, "Setting up Bresser Weather Sensor Receiver");
             this->ws_.begin();
+
+            // Queue anlegen: RawFrame-Structs von Core 0 → Core 1
+            this->data_queue_ = xQueueCreate(RF_QUEUE_DEPTH, sizeof(RawFrame));
+            if (this->data_queue_ == nullptr)
+            {
+                ESP_LOGE(TAG, "Queue konnte nicht erstellt werden!");
+                return;
+            }
+
+            // RF-Task auf Core 0 starten
+            BaseType_t result = xTaskCreatePinnedToCore(
+                rf_task_,               // Task-Funktion
+                "bresser_rf",           // Name (für Debugging)
+                RF_TASK_STACK,          // Stack in Bytes
+                this,                   // Argument: Zeiger auf Component
+                RF_TASK_PRIORITY,       // Priorität
+                &this->rf_task_handle_, // Handle
+                RF_TASK_CORE            // Core (0)
+            );
+
+            if (result != pdPASS)
+            {
+                ESP_LOGE(TAG, "RF-Task konnte nicht gestartet werden! (err=%d)", result);
+                return;
+            }
+
 #if BRESSER_DEBUG_STATS
             this->dbg_last_stats_ms_ = millis();
-            ESP_LOGI(TAG, "Frame-loss statistics enabled (interval %u ms)",
-                     BRESSER_STATS_INTERVAL_MS);
+            ESP_LOGI(TAG, "RF-Task gestartet auf Core %d  Prio=%d  Queue=%d  Stats-Intervall=%ums",
+                     RF_TASK_CORE, RF_TASK_PRIORITY, RF_QUEUE_DEPTH, BRESSER_STATS_INTERVAL_MS);
 #else
-            ESP_LOGI(TAG, "Frame-loss statistics disabled (BRESSER_DEBUG_STATS=0)");
+            ESP_LOGI(TAG, "RF-Task gestartet auf Core %d  Prio=%d  Queue=%d  Stats=aus",
+                     RF_TASK_CORE, RF_TASK_PRIORITY, RF_QUEUE_DEPTH);
 #endif
-            ESP_LOGI(TAG, "Receiver initialized successfully");
         }
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
+        // rf_task_()  –  läuft DAUERHAFT auf Core 0
+        //
+        // Darf NUR ws_-Zugriffe machen und in die Queue schreiben.
+        // Kein publish_state(), kein ESP_LOG* mit großen Strings,
+        // kein ESPHome-API-Zugriff – alles das ist nicht thread-sicher!
+        // ═════════════════════════════════════════════════════════════════════
+        void BresserWeatherComponent::rf_task_(void *arg)
+        {
+            BresserWeatherComponent *self = static_cast<BresserWeatherComponent *>(arg);
+
+            for (;;)
+            {
+                int decode_status = self->ws_.getMessage();
+
+                if (decode_status == DECODE_TIMEOUT)
+                {
+#if BRESSER_DEBUG_STATS
+                    self->dbg_timeout_++;
+#endif
+                    // Kein Delay – sofort nächster Versuch.
+                    // FreeRTOS-Scheduler gibt anderen Tasks trotzdem CPU.
+                    continue;
+                }
+
+                if (decode_status != DECODE_OK)
+                {
+#if BRESSER_DEBUG_STATS
+                    self->dbg_invalid_++;
+#endif
+                    continue;
+                }
+
+#if BRESSER_DEBUG_STATS
+                self->dbg_ok_++;
+#endif
+
+                // Alle validen Slots in die Queue schreiben
+                for (size_t i = 0; i < self->ws_.sensor.size(); ++i)
+                {
+                    if (!self->ws_.sensor[i].valid)
+                        continue;
+
+                    RawFrame frame{};
+                    frame.s_type     = self->ws_.sensor[i].s_type;
+                    frame.sensor_id  = self->ws_.sensor[i].sensor_id;
+                    frame.rssi       = self->ws_.sensor[i].rssi;
+                    frame.battery_ok = self->ws_.sensor[i].battery_ok;
+
+                    // Weather-Union – gilt für WS und Pool
+                    frame.temp_c              = self->ws_.sensor[i].w.temp_c;
+                    frame.temp_ok             = self->ws_.sensor[i].w.temp_ok;
+                    frame.humidity            = self->ws_.sensor[i].w.humidity;
+                    frame.humidity_ok         = self->ws_.sensor[i].w.humidity_ok;
+                    frame.wind_gust_meter_sec = self->ws_.sensor[i].w.wind_gust_meter_sec;
+                    frame.wind_avg_meter_sec  = self->ws_.sensor[i].w.wind_avg_meter_sec;
+                    frame.wind_direction_deg  = self->ws_.sensor[i].w.wind_direction_deg;
+                    frame.wind_ok             = self->ws_.sensor[i].w.wind_ok;
+                    frame.rain_mm             = self->ws_.sensor[i].w.rain_mm;
+                    frame.rain_ok             = self->ws_.sensor[i].w.rain_ok;
+                    frame.uv                  = self->ws_.sensor[i].w.uv;
+                    frame.uv_ok               = self->ws_.sensor[i].w.uv_ok;
+                    frame.light_klx           = self->ws_.sensor[i].w.light_klx;
+                    frame.light_ok            = self->ws_.sensor[i].w.light_ok;
+
+                    // Nicht blockierend senden (0 = kein Warten auf freien Platz).
+                    // Bei vollem Queue wird der Frame verworfen – passiert nur wenn
+                    // Core 1 für >RF_QUEUE_DEPTH Frames nicht zum Verarbeiten kommt.
+                    if (xQueueSend(self->data_queue_, &frame, 0) != pdTRUE)
+                    {
+#if BRESSER_DEBUG_STATS
+                        self->dbg_invalid_++; // Queue-Overflow als "verloren" zählen
+#endif
+                    }
+                }
+
+                self->ws_.clearSlots();
+            }
+            // Nie erreicht – Task läuft für immer
+            vTaskDelete(nullptr);
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // loop()  –  läuft auf Core 1 (ESPHome-Loop)
+        //
+        // Nur: Queue leeren + publish_state() aufrufen.
+        // Kein ws_-Zugriff hier!
+        // ═════════════════════════════════════════════════════════════════════
         void BresserWeatherComponent::loop()
         {
-            // ── Periodic stats summary ────────────────────────────────────────
-            // Compiled out completely when BRESSER_DEBUG_STATS=0.
+            if (this->data_queue_ == nullptr)
+                return;
+
+            // ── Debug-Stats (nur Core 1, kein Lock nötig für Log-Ausgabe) ─────
 #if BRESSER_DEBUG_STATS
             {
                 uint32_t now_ms = millis();
                 if (now_ms - this->dbg_last_stats_ms_ >= BRESSER_STATS_INTERVAL_MS)
                 {
+                    uint32_t queue_waiting = uxQueueMessagesWaiting(this->data_queue_);
                     ESP_LOGI(TAG,
                              "[Stats] OK=%" PRIu32 "  Invalid=%" PRIu32
                              "  Timeout=%" PRIu32 "  Weather=%" PRIu32
                              "  Pool=%" PRIu32 "  Filtered=%" PRIu32
-                             "  Unknown=%" PRIu32,
-                             this->dbg_ok_,
-                             this->dbg_invalid_,
-                             this->dbg_timeout_,
-                             this->dbg_weather_,
-                             this->dbg_pool_,
-                             this->dbg_filtered_,
-                             this->dbg_unknown_);
-                    this->dbg_ok_            = 0;
-                    this->dbg_invalid_       = 0;
-                    this->dbg_timeout_       = 0;
-                    this->dbg_weather_       = 0;
-                    this->dbg_pool_          = 0;
-                    this->dbg_filtered_      = 0;
-                    this->dbg_unknown_       = 0;
+                             "  Unknown=%" PRIu32 "  Queue=%" PRIu32,
+                             (uint32_t)this->dbg_ok_,
+                             (uint32_t)this->dbg_invalid_,
+                             (uint32_t)this->dbg_timeout_,
+                             (uint32_t)this->dbg_weather_,
+                             (uint32_t)this->dbg_pool_,
+                             (uint32_t)this->dbg_filtered_,
+                             (uint32_t)this->dbg_unknown_,
+                             queue_waiting);
+                    this->dbg_ok_       = 0;
+                    this->dbg_invalid_  = 0;
+                    this->dbg_timeout_  = 0;
+                    this->dbg_weather_  = 0;
+                    this->dbg_pool_     = 0;
+                    this->dbg_filtered_ = 0;
+                    this->dbg_unknown_  = 0;
                     this->dbg_last_stats_ms_ = now_ms;
                 }
             }
-#endif // BRESSER_DEBUG_STATS
-
-            // ── Receive one radio frame ───────────────────────────────────────
-            // NOTE: clearSlots() is called AFTER processing, not before
-            // getMessage(). Calling it at the top of the loop would discard
-            // any frame the library has already buffered before we read it.
-            int decode_status = this->ws_.getMessage();
-
-            if (decode_status == DECODE_TIMEOUT)
-            {
-#if BRESSER_DEBUG_STATS
-                this->dbg_timeout_++;
 #endif
-                // No frame in receive window – yield so other components get CPU.
-                // Never use delay() here; it blocks the entire ESPHome loop.
-                yield();
+
+            if (this->data_queue_ == nullptr)
                 return;
-            }
 
-            if (decode_status != DECODE_OK)
+            // ── Queue vollständig leeren ──────────────────────────────────────
+            // Alle seit dem letzten loop()-Aufruf empfangenen Frames verarbeiten.
+            RawFrame frame{};
+            while (xQueueReceive(this->data_queue_, &frame, 0) == pdTRUE)
             {
-                // DECODE_INVALID: frame received but CRC/decode failed.
-                // High rate = RF interference or a nearby 868 MHz device.
-#if BRESSER_DEBUG_STATS
-                this->dbg_invalid_++;
-                ESP_LOGV(TAG, "DECODE_INVALID (total=%" PRIu32 ")", this->dbg_invalid_);
-#else
-                ESP_LOGV(TAG, "DECODE_INVALID");
-#endif
-                yield();
-                return;
-            }
+                const uint8_t s_type = frame.s_type;
 
-#if BRESSER_DEBUG_STATS
-            this->dbg_ok_++;
-#endif
-
-            // ── Process all valid slots ───────────────────────────────────────
-            // After a single getMessage() exactly one slot is valid.
-            // Iterating all slots keeps the code correct for future library
-            // changes and 6-in-1 two-message sequences.
-            for (size_t i = 0; i < this->ws_.sensor.size(); ++i)
-            {
-                if (!this->ws_.sensor[i].valid)
-                    continue;
-
-                const uint8_t s_type = this->ws_.sensor[i].s_type;
-
-                // =================================================================
-                // WEATHER STATION  (5-in-1 / 6-in-1 / 7-in-1 / 8-in-1 / rain WS)
-                //
-                // Library defines (WeatherSensor.h):
-                //   SENSOR_TYPE_WEATHER0 = 0   5-in-1
-                //   SENSOR_TYPE_WEATHER1 = 1   6-in-1 / 7-in-1
-                //   SENSOR_TYPE_WEATHER3 = 12  3-in-1 Professional Rain Gauge
-                //   SENSOR_TYPE_WEATHER8 = 13  8-in-1
-                // =================================================================
+                // =============================================================
+                // WETTERSTATION
+                // =============================================================
                 if (s_type == SENSOR_TYPE_WEATHER0 ||
                     s_type == SENSOR_TYPE_WEATHER1  ||
                     s_type == SENSOR_TYPE_WEATHER3  ||
                     s_type == SENSOR_TYPE_WEATHER8)
                 {
-                    if (this->filter_enabled_ &&
-                        this->ws_.sensor[i].sensor_id != this->filter_sensor_id_)
+                    if (this->filter_enabled_ && frame.sensor_id != this->filter_sensor_id_)
                     {
 #if BRESSER_DEBUG_STATS
                         this->dbg_filtered_++;
 #endif
-                        ESP_LOGD(TAG, "[Weather] Filtered s_type=0x%02X ID=%08X (want %08X)",
-                                 s_type,
-                                 (unsigned int)this->ws_.sensor[i].sensor_id,
+                        ESP_LOGD(TAG, "[Weather] Filtered ID=%08X (want %08X)",
+                                 (unsigned int)frame.sensor_id,
                                  (unsigned int)this->filter_sensor_id_);
                         continue;
                     }
@@ -134,101 +209,77 @@ namespace esphome
                     this->dbg_weather_++;
 #endif
                     char id_buf[16];
-                    snprintf(id_buf, sizeof(id_buf), "%08X",
-                             (unsigned int)this->ws_.sensor[i].sensor_id);
+                    snprintf(id_buf, sizeof(id_buf), "%08X", (unsigned int)frame.sensor_id);
 
                     if (this->sensor_id_sensor_)
                         this->sensor_id_sensor_->publish_state(id_buf);
-
                     if (this->rssi_sensor_)
-                        this->rssi_sensor_->publish_state(this->ws_.sensor[i].rssi);
-
-                    // HA BATTERY device_class: ON = Low, OFF = OK  →  invert
+                        this->rssi_sensor_->publish_state(frame.rssi);
                     if (this->battery_sensor_)
-                        this->battery_sensor_->publish_state(!this->ws_.sensor[i].battery_ok);
-
-                    if (this->ws_.sensor[i].w.temp_ok && this->temperature_sensor_)
-                        this->temperature_sensor_->publish_state(this->ws_.sensor[i].w.temp_c);
-
-                    if (this->ws_.sensor[i].w.humidity_ok && this->humidity_sensor_)
-                        this->humidity_sensor_->publish_state(this->ws_.sensor[i].w.humidity);
-
-                    if (this->ws_.sensor[i].w.wind_ok)
+                        this->battery_sensor_->publish_state(!frame.battery_ok);
+                    if (frame.temp_ok && this->temperature_sensor_)
+                        this->temperature_sensor_->publish_state(frame.temp_c);
+                    if (frame.humidity_ok && this->humidity_sensor_)
+                        this->humidity_sensor_->publish_state(frame.humidity);
+                    if (frame.wind_ok)
                     {
                         if (this->wind_gust_sensor_)
-                            this->wind_gust_sensor_->publish_state(
-                                this->ws_.sensor[i].w.wind_gust_meter_sec);
+                            this->wind_gust_sensor_->publish_state(frame.wind_gust_meter_sec);
                         if (this->wind_speed_sensor_)
-                            this->wind_speed_sensor_->publish_state(
-                                this->ws_.sensor[i].w.wind_avg_meter_sec);
+                            this->wind_speed_sensor_->publish_state(frame.wind_avg_meter_sec);
                         if (this->wind_direction_sensor_)
-                            this->wind_direction_sensor_->publish_state(
-                                this->ws_.sensor[i].w.wind_direction_deg);
+                            this->wind_direction_sensor_->publish_state(frame.wind_direction_deg);
                     }
-
-                    if (this->ws_.sensor[i].w.rain_ok && this->rain_sensor_)
-                        this->rain_sensor_->publish_state(this->ws_.sensor[i].w.rain_mm);
-
-                    if (this->ws_.sensor[i].w.uv_ok && this->uv_sensor_)
-                        this->uv_sensor_->publish_state(this->ws_.sensor[i].w.uv);
-
-                    if (this->ws_.sensor[i].w.light_ok && this->light_sensor_)
-                        this->light_sensor_->publish_state(this->ws_.sensor[i].w.light_klx);
+                    if (frame.rain_ok && this->rain_sensor_)
+                        this->rain_sensor_->publish_state(frame.rain_mm);
+                    if (frame.uv_ok && this->uv_sensor_)
+                        this->uv_sensor_->publish_state(frame.uv);
+                    if (frame.light_ok && this->light_sensor_)
+                        this->light_sensor_->publish_state(frame.light_klx);
 
                     WeatherData data{};
                     data.sensor_id      = id_buf;
-                    data.rssi           = this->ws_.sensor[i].rssi;
-                    data.battery_ok     = this->ws_.sensor[i].battery_ok;
-                    data.temperature    = this->ws_.sensor[i].w.temp_ok     ? this->ws_.sensor[i].w.temp_c              : NAN;
-                    data.temperature_ok = this->ws_.sensor[i].w.temp_ok;
-                    data.humidity       = this->ws_.sensor[i].w.humidity_ok ? (float)this->ws_.sensor[i].w.humidity     : NAN;
-                    data.humidity_ok    = this->ws_.sensor[i].w.humidity_ok;
-                    data.wind_gust      = this->ws_.sensor[i].w.wind_ok     ? this->ws_.sensor[i].w.wind_gust_meter_sec : NAN;
-                    data.wind_speed     = this->ws_.sensor[i].w.wind_ok     ? this->ws_.sensor[i].w.wind_avg_meter_sec  : NAN;
-                    data.wind_direction = this->ws_.sensor[i].w.wind_ok     ? this->ws_.sensor[i].w.wind_direction_deg  : NAN;
-                    data.wind_ok        = this->ws_.sensor[i].w.wind_ok;
-                    data.rain           = this->ws_.sensor[i].w.rain_ok     ? this->ws_.sensor[i].w.rain_mm             : NAN;
-                    data.rain_ok        = this->ws_.sensor[i].w.rain_ok;
-                    data.uv             = this->ws_.sensor[i].w.uv_ok       ? this->ws_.sensor[i].w.uv                  : NAN;
-                    data.uv_ok          = this->ws_.sensor[i].w.uv_ok;
-                    data.light          = this->ws_.sensor[i].w.light_ok    ? this->ws_.sensor[i].w.light_klx           : NAN;
-                    data.light_ok       = this->ws_.sensor[i].w.light_ok;
-                    // pool_valid stays false; pool fields keep NAN/false defaults
+                    data.rssi           = frame.rssi;
+                    data.battery_ok     = frame.battery_ok;
+                    data.temperature    = frame.temp_ok     ? frame.temp_c              : NAN;
+                    data.temperature_ok = frame.temp_ok;
+                    data.humidity       = frame.humidity_ok ? (float)frame.humidity      : NAN;
+                    data.humidity_ok    = frame.humidity_ok;
+                    data.wind_gust      = frame.wind_ok     ? frame.wind_gust_meter_sec  : NAN;
+                    data.wind_speed     = frame.wind_ok     ? frame.wind_avg_meter_sec   : NAN;
+                    data.wind_direction = frame.wind_ok     ? frame.wind_direction_deg   : NAN;
+                    data.wind_ok        = frame.wind_ok;
+                    data.rain           = frame.rain_ok     ? frame.rain_mm              : NAN;
+                    data.rain_ok        = frame.rain_ok;
+                    data.uv             = frame.uv_ok       ? frame.uv                   : NAN;
+                    data.uv_ok          = frame.uv_ok;
+                    data.light          = frame.light_ok    ? frame.light_klx            : NAN;
+                    data.light_ok       = frame.light_ok;
                     this->data_callback_.call(data);
 
                     ESP_LOGD(TAG,
                              "[Weather] ID=%s T=%.1f°C H=%d%% "
                              "Wnd=%.1f/%.1fm/s@%.0f° R=%.1fmm "
                              "UV=%.1f Light=%.1fklx RSSI=%.1fdBm Bat=%s",
-                             id_buf,
-                             this->ws_.sensor[i].w.temp_c,
-                             this->ws_.sensor[i].w.humidity,
-                             this->ws_.sensor[i].w.wind_avg_meter_sec,
-                             this->ws_.sensor[i].w.wind_gust_meter_sec,
-                             this->ws_.sensor[i].w.wind_direction_deg,
-                             this->ws_.sensor[i].w.rain_mm,
-                             this->ws_.sensor[i].w.uv,
-                             this->ws_.sensor[i].w.light_klx,
-                             this->ws_.sensor[i].rssi,
-                             this->ws_.sensor[i].battery_ok ? "OK" : "Low");
+                             id_buf, frame.temp_c, frame.humidity,
+                             frame.wind_avg_meter_sec, frame.wind_gust_meter_sec,
+                             frame.wind_direction_deg, frame.rain_mm,
+                             frame.uv, frame.light_klx,
+                             frame.rssi, frame.battery_ok ? "OK" : "Low");
                 }
 
-                // =================================================================
-                // POOL / SPA THERMOMETER  (6-in-1 decoder, PN 7000073)
-                //
-                // Library define: SENSOR_TYPE_POOL_THERMO = 3
-                // Temperature in Weather union: w.temp_c / w.temp_ok
-                // =================================================================
+                // =============================================================
+                // POOL THERMOMETER  (SENSOR_TYPE_POOL_THERMO = 3)
+                // =============================================================
                 else if (s_type == SENSOR_TYPE_POOL_THERMO)
                 {
-                    if (this->filter_pool_enabled_ &&
-                        this->ws_.sensor[i].sensor_id != this->filter_pool_sensor_id_)
+                    if (this->filter_pool_enabled_ && frame.sensor_id != this->filter_pool_sensor_id_)
                     {
 #if BRESSER_DEBUG_STATS
                         this->dbg_filtered_++;
 #endif
                         ESP_LOGD(TAG, "[Pool] Filtered ID=%08X (want %08X)",
-                                 (unsigned int)this->ws_.sensor[i].sensor_id,
+                                 (unsigned int)frame.sensor_id,
                                  (unsigned int)this->filter_pool_sensor_id_);
                         continue;
                     }
@@ -237,76 +288,47 @@ namespace esphome
                     this->dbg_pool_++;
 #endif
                     char id_buf[16];
-                    snprintf(id_buf, sizeof(id_buf), "%08X",
-                             (unsigned int)this->ws_.sensor[i].sensor_id);
+                    snprintf(id_buf, sizeof(id_buf), "%08X", (unsigned int)frame.sensor_id);
 
                     if (this->pool_sensor_id_sensor_)
                         this->pool_sensor_id_sensor_->publish_state(id_buf);
-
                     if (this->pool_rssi_sensor_)
-                        this->pool_rssi_sensor_->publish_state(this->ws_.sensor[i].rssi);
-
-                    // HA BATTERY device_class: ON = Low, OFF = OK  →  invert
+                        this->pool_rssi_sensor_->publish_state(frame.rssi);
                     if (this->pool_battery_sensor_)
-                        this->pool_battery_sensor_->publish_state(!this->ws_.sensor[i].battery_ok);
-
-                    // Pool temperature is in w.temp_c (same Weather union as WS)
-                    if (this->ws_.sensor[i].w.temp_ok && this->water_temperature_sensor_)
-                        this->water_temperature_sensor_->publish_state(
-                            this->ws_.sensor[i].w.temp_c);
+                        this->pool_battery_sensor_->publish_state(!frame.battery_ok);
+                    if (frame.temp_ok && this->water_temperature_sensor_)
+                        this->water_temperature_sensor_->publish_state(frame.temp_c);
 
                     WeatherData data{};
                     data.pool_valid           = true;
                     data.pool_sensor_id       = id_buf;
-                    data.pool_rssi            = this->ws_.sensor[i].rssi;
-                    data.pool_battery_ok      = this->ws_.sensor[i].battery_ok;
-                    data.water_temperature    = this->ws_.sensor[i].w.temp_ok
-                                                    ? this->ws_.sensor[i].w.temp_c : NAN;
-                    data.water_temperature_ok = this->ws_.sensor[i].w.temp_ok;
-                    data.temperature    = NAN;
-                    data.humidity       = NAN;
-                    data.wind_gust      = NAN;
-                    data.wind_speed     = NAN;
-                    data.wind_direction = NAN;
-                    data.rain           = NAN;
-                    data.uv             = NAN;
-                    data.light          = NAN;
+                    data.pool_rssi            = frame.rssi;
+                    data.pool_battery_ok      = frame.battery_ok;
+                    data.water_temperature    = frame.temp_ok ? frame.temp_c : NAN;
+                    data.water_temperature_ok = frame.temp_ok;
+                    data.temperature    = NAN; data.humidity = NAN;
+                    data.wind_gust      = NAN; data.wind_speed = NAN;
+                    data.wind_direction = NAN; data.rain = NAN;
+                    data.uv             = NAN; data.light = NAN;
                     this->data_callback_.call(data);
 
                     ESP_LOGD(TAG, "[Pool] ID=%s WaterTemp=%.1f°C RSSI=%.1fdBm Bat=%s",
-                             id_buf,
-                             this->ws_.sensor[i].w.temp_c,
-                             this->ws_.sensor[i].rssi,
-                             this->ws_.sensor[i].battery_ok ? "OK" : "Low");
+                             id_buf, frame.temp_c, frame.rssi,
+                             frame.battery_ok ? "OK" : "Low");
                 }
 
-                // =================================================================
-                // UNKNOWN – VERBOSE so it doesn't spam at normal log levels
-                // =================================================================
+                // =============================================================
+                // UNBEKANNTER TYP
+                // =============================================================
                 else
                 {
 #if BRESSER_DEBUG_STATS
                     this->dbg_unknown_++;
-                    ESP_LOGV(TAG,
-                             "Unknown s_type=0x%02X ID=%08X RSSI=%.1fdBm "
-                             "(total unknown=%" PRIu32 ")",
-                             s_type,
-                             (unsigned int)this->ws_.sensor[i].sensor_id,
-                             this->ws_.sensor[i].rssi,
-                             this->dbg_unknown_);
-#else
-                    ESP_LOGV(TAG, "Unknown s_type=0x%02X ID=%08X RSSI=%.1fdBm",
-                             s_type,
-                             (unsigned int)this->ws_.sensor[i].sensor_id,
-                             this->ws_.sensor[i].rssi);
 #endif
+                    ESP_LOGV(TAG, "Unknown s_type=0x%02X ID=%08X RSSI=%.1fdBm",
+                             s_type, (unsigned int)frame.sensor_id, frame.rssi);
                 }
-            } // for each slot
-
-            // Clear slots AFTER processing – never before getMessage(),
-            // or buffered frames would be thrown away before being read.
-            this->ws_.clearSlots();
-
+            } // while queue not empty
         } // loop()
 
     } // namespace bresser_weather

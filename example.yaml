@@ -6,6 +6,7 @@ esphome:
   friendly_name: ${friendly_name}
   libraries:
     - SPI
+
 esp32:
   board: esp32dev
   framework:
@@ -14,24 +15,39 @@ esp32:
     advanced:
       minimum_chip_revision: "3.0"
 
+# ── SPI-Busse ──────────────────────────────────────────────────────────────────
+#
+#  Bus 1 – CC1101 (VSPI, GPIO 18/19/23)
+#    RadioLib greift direkt auf den globalen SPI-Singleton zu.
+#    Der RF-Task läuft auf Core 0 und nutzt diesen Bus exklusiv.
+#
+#  Bus 2 – BME280 (freie Pins, kein Konflikt mit CC1101)
+#    ESPHome steuert diesen Bus aus Core 1 (ESPHome-Loop).
+#    Pins anpassen falls belegt: CLK=14  MISO=25  MOSI=26  CS=4
+#
+# ──────────────────────────────────────────────────────────────────────────────
 spi:
-  clk_pin: GPIO18
-  miso_pin: GPIO19
-  mosi_pin: GPIO23
+  - id: spi_cc1101
+    clk_pin: GPIO18
+    miso_pin: GPIO19
+    mosi_pin: GPIO23
+
+  - id: spi_bme280
+    clk_pin: GPIO14
+    miso_pin: GPIO25
+    mosi_pin: GPIO26
 
 external_components:
   - source: github://MaxRei-dev/bresser_weather-esphome@main
     refresh: 0s
     components: [bresser_weather]
 
-# Enable logging
 logger:
   level: DEBUG
 
 web_server:
   port: 80
 
-# Enable Home Assistant API
 api:
   encryption:
     key: !secret api_key
@@ -47,32 +63,78 @@ wifi:
   power_save_mode: none
   domain: !secret domain
 
-# Example configuration entry
 sensor:
   - platform: internal_temperature
     name: "${friendly_name} Internal Temperature"
+
+  # ── BME280 Umgebungssensor ────────────────────────────────────────────────────
+  # Läuft vollständig auf Core 1 (ESPHome-Loop) über eigenen SPI-Bus.
+  # Kein Konflikt mit dem CC1101 auf Bus 1.
+  - platform: bme280_spi
+    spi_id: spi_bme280
+    cs_pin: GPIO4
+    update_interval: 60s
+    temperature:
+      name: "${friendly_name} Umgebungstemperatur (BME280)"
+      device_class: "temperature"
+      state_class: "measurement"
+      unit_of_measurement: "°C"
+      accuracy_decimals: 1
+    humidity:
+      name: "${friendly_name} Umgebungsfeuchte (BME280)"
+      device_class: "humidity"
+      state_class: "measurement"
+      unit_of_measurement: "%"
+      accuracy_decimals: 0
+    pressure:
+      name: "${friendly_name} Luftdruck (BME280)"
+      device_class: "pressure"
+      state_class: "measurement"
+      unit_of_measurement: "hPa"
+      accuracy_decimals: 1
 
 button:
   - platform: restart
     name: "${friendly_name} Restart"
 
+# ── Bresser Wetterstation ──────────────────────────────────────────────────────
+#
+# Dual-Core Architektur:
+#
+#   Core 0 (bresser_rf Task)          Core 1 (ESPHome Loop)
+#   ────────────────────────          ──────────────────────────────
+#   ws_.getMessage()           ──┐    WiFi / MQTT / API / OTA
+#   ws_.clearSlots()             │    BME280 lesen
+#   RawFrame befüllen            │    bresser_weather::loop()
+#   xQueueSend() ────────────────┼──▶   xQueueReceive()
+#                                │       publish_state()
+#   [läuft 100% der Zeit]        │       Callbacks
+#                          FreeRTOS Queue (RF_QUEUE_DEPTH=8)
+#
+# Konfigurierbare Parameter (build_flags):
+#   -DRF_TASK_CORE=0           Core für den RF-Task (Standard: 0)
+#   -DRF_TASK_PRIORITY=2       FreeRTOS-Priorität   (Standard: 2)
+#   -DRF_TASK_STACK=4096       Stack in Bytes        (Standard: 4096)
+#   -DRF_QUEUE_DEPTH=8         Queue-Tiefe           (Standard: 8)
+#   -DBRESSER_DEBUG_STATS=0    Frame-Statistiken aus (Standard: ein)
+# ──────────────────────────────────────────────────────────────────────────────
 bresser_weather:
   radio: cc1101
   pins:
-    cs: 27 # D8
-    irq: 21 # D2 (GD0)
-    gpio: 33 # D1 (GD2)
-    rst: -1 # RADIOLIB_NC
+    cs: 27    # D8
+    irq: 21   # D2 (GD0)
+    gpio: 33  # D1 (GD2)
+    rst: -1   # RADIOLIB_NC
 
   filter_sensor_id: 0x00008BFC
   filter_pool_sensor_id: 0x27761309
 
-# Weather station 
+  # Wetterstation
   temperature:
     name: "${friendly_name} Temperatur"
     device_class: "temperature"
     state_class: "measurement"
-    unit_of_measurement: "°C" 
+    unit_of_measurement: "°C"
   humidity:
     name: "${friendly_name} Luftfeuchtigkeit"
     device_class: "humidity"
@@ -119,7 +181,8 @@ bresser_weather:
   sensor_id:
     name: "${friendly_name} Sensor ID"
     entity_category: "diagnostic"
-# Pool Sensor 
+
+  # Pool Sensor
   water_temperature:
     name: "${friendly_name} Pool Wassertemperatur"
     device_class: "temperature"

@@ -9,42 +9,27 @@
 #include "WeatherSensorCfg.h"
 #include "WeatherSensor.h"
 
+// FreeRTOS – nur auf ESP32 verfügbar
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Safety fallback: SENSOR_TYPE_POOL_THERMO was added to WeatherSensor.h on
-// 20231024. Older library copies may not have it.
+// Safety fallbacks
 // ─────────────────────────────────────────────────────────────────────────────
 #ifndef SENSOR_TYPE_POOL_THERMO
 #define SENSOR_TYPE_POOL_THERMO 3
 #endif
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Safety fallback: DECODE_TIMEOUT was added to the library's DecodeStatus
-// enum at a later point. If the installed version only knows DECODE_OK and
-// DECODE_INVALID, map DECODE_TIMEOUT to DECODE_INVALID so the .cpp compiles.
-// Effect: on older libraries the debug counter dbg_timeout_ stays at 0 and
-// timeouts are counted as dbg_invalid_ instead – functionally correct.
-// ─────────────────────────────────────────────────────────────────────────────
 #ifndef DECODE_TIMEOUT
 #define DECODE_TIMEOUT DECODE_INVALID
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Debug / frame-loss statistics
+// Debug / Frame-Loss Statistiken
 //
-// BRESSER_DEBUG_STATS controls whether frame counters and periodic summary
-// logging are compiled in.
-//
-//   Enabled  (default): define BRESSER_DEBUG_STATS 1
-//   Disabled           : define BRESSER_DEBUG_STATS 0
-//
-// Override in your ESPHome YAML:
-//   esphome:
-//     build_flags:
-//       - "-DBRESSER_DEBUG_STATS=0"   # disable
-//       - "-DBRESSER_DEBUG_STATS=1"   # enable  (default)
-//
-// When enabled, a stats summary is logged at INFO level every
-// BRESSER_STATS_INTERVAL_MS milliseconds (default: 60 s).
+// Deaktivieren:  build_flags: ["-DBRESSER_DEBUG_STATS=0"]
+// Intervall:     build_flags: ["-DBRESSER_STATS_INTERVAL_MS=30000"]
 // ─────────────────────────────────────────────────────────────────────────────
 #ifndef BRESSER_DEBUG_STATS
 #define BRESSER_DEBUG_STATS 1
@@ -52,38 +37,55 @@
 
 #if BRESSER_DEBUG_STATS
 #ifndef BRESSER_STATS_INTERVAL_MS
-#define BRESSER_STATS_INTERVAL_MS 60000U   // 60 s – change freely
+#define BRESSER_STATS_INTERVAL_MS 60000U
 #endif
-#endif // BRESSER_DEBUG_STATS
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dual-Core Konfiguration
+//
+// RF_TASK_CORE:       CPU-Core für den RF-Empfangs-Task (0 oder 1)
+// RF_TASK_PRIORITY:   FreeRTOS-Priorität (1 = niedrig, 24 = WiFi-Stack)
+// RF_TASK_STACK:      Stack-Größe in Bytes
+// RF_QUEUE_DEPTH:     Maximale gepufferte Frames zwischen den Cores
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef RF_TASK_CORE
+#define RF_TASK_CORE     0          // Core 0: teilt sich mit WiFi-Stack
+#endif
+#ifndef RF_TASK_PRIORITY
+#define RF_TASK_PRIORITY 2          // Unter WiFi (23), über Idle (0)
+#endif
+#ifndef RF_TASK_STACK
+#define RF_TASK_STACK    4096       // Bytes
+#endif
+#ifndef RF_QUEUE_DEPTH
+#define RF_QUEUE_DEPTH   8          // Frames die gepuffert werden können
+#endif
 
 namespace esphome
 {
     namespace bresser_weather
     {
+        // ─────────────────────────────────────────────────────────────────────
+        // WeatherData – wird über den on_value Callback an Automationen
+        // übergeben. Lebt ausschließlich auf Core 1 (ESPHome-Loop).
+        // ─────────────────────────────────────────────────────────────────────
         struct WeatherData
         {
-            // ── Weather station ──────────────────────────────────────────────
+            // ── Wetterstation ────────────────────────────────────────────────
             std::string sensor_id;
             float rssi;
             bool battery_ok;
-            float temperature;
-            bool temperature_ok;
-            float humidity;
-            bool humidity_ok;
+            float temperature;      bool temperature_ok;
+            float humidity;         bool humidity_ok;
             float wind_gust;
             float wind_speed;
-            float wind_direction;
-            bool wind_ok;
-            float rain;
-            bool rain_ok;
-            float uv;
-            bool uv_ok;
-            float light;
-            bool light_ok;
+            float wind_direction;   bool wind_ok;
+            float rain;             bool rain_ok;
+            float uv;               bool uv_ok;
+            float light;            bool light_ok;
 
-            // ── Pool / Spa Thermometer (3-in-1, PN 7000073) ─────────────────
-            // pool_valid is true only in frames that carry pool data.
-            // In those frames the weather fields above are NAN / false.
+            // ── Pool / Spa Thermometer (PN 7000073) ──────────────────────────
             bool pool_valid{false};
             std::string pool_sensor_id;
             float pool_rssi{NAN};
@@ -92,6 +94,30 @@ namespace esphome
             bool water_temperature_ok{false};
         };
 
+        // ─────────────────────────────────────────────────────────────────────
+        // RawFrame – POD-Struct ohne dynamische Allokation.
+        // Wird über die FreeRTOS-Queue von Core 0 → Core 1 übertragen.
+        // Kein std::string, keine Zeiger – queue-sicher.
+        // ─────────────────────────────────────────────────────────────────────
+        struct RawFrame
+        {
+            uint8_t  s_type;
+            uint32_t sensor_id;
+            float    rssi;
+            bool     battery_ok;
+
+            // Weather-Union Felder (auch für Pool genutzt)
+            float    temp_c;                bool temp_ok;
+            uint8_t  humidity;              bool humidity_ok;
+            float    wind_gust_meter_sec;
+            float    wind_avg_meter_sec;
+            float    wind_direction_deg;    bool wind_ok;
+            float    rain_mm;               bool rain_ok;
+            float    uv;                    bool uv_ok;
+            float    light_klx;             bool light_ok;
+        };
+
+        // ─────────────────────────────────────────────────────────────────────
         class BresserWeatherComponent : public Component
         {
         public:
@@ -99,7 +125,7 @@ namespace esphome
             void loop() override;
             float get_setup_priority() const override { return setup_priority::DATA; }
 
-            // ── Weather station sensors ──────────────────────────────────────
+            // ── Wetterstation Sensor-Setter ───────────────────────────────────
             void set_temperature_sensor(sensor::Sensor *s)             { temperature_sensor_ = s; }
             void set_humidity_sensor(sensor::Sensor *s)                { humidity_sensor_ = s; }
             void set_wind_gust_sensor(sensor::Sensor *s)               { wind_gust_sensor_ = s; }
@@ -112,13 +138,13 @@ namespace esphome
             void set_battery_sensor(binary_sensor::BinarySensor *s)    { battery_sensor_ = s; }
             void set_sensor_id_text_sensor(text_sensor::TextSensor *s) { sensor_id_sensor_ = s; }
 
-            // ── Pool thermometer sensors ─────────────────────────────────────
+            // ── Pool Thermometer Sensor-Setter ────────────────────────────────
             void set_water_temperature_sensor(sensor::Sensor *s)            { water_temperature_sensor_ = s; }
             void set_pool_rssi_sensor(sensor::Sensor *s)                     { pool_rssi_sensor_ = s; }
             void set_pool_battery_sensor(binary_sensor::BinarySensor *s)    { pool_battery_sensor_ = s; }
             void set_pool_sensor_id_text_sensor(text_sensor::TextSensor *s) { pool_sensor_id_sensor_ = s; }
 
-            // ── Filters ─────────────────────────────────────────────────────
+            // ── Filter ────────────────────────────────────────────────────────
             void set_filter_sensor_id(uint32_t id)
             {
                 filter_sensor_id_ = id;
@@ -136,17 +162,14 @@ namespace esphome
             }
 
         protected:
+            // ── Radio (nur von rf_task_ auf Core 0 anfassen!) ─────────────────
             WeatherSensor ws_;
 
-            // ── Weather station filter ───────────────────────────────────────
-            uint32_t filter_sensor_id_{0};
-            bool     filter_enabled_{false};
+            // ── Filter ────────────────────────────────────────────────────────
+            uint32_t filter_sensor_id_{0};      bool filter_enabled_{false};
+            uint32_t filter_pool_sensor_id_{0}; bool filter_pool_enabled_{false};
 
-            // ── Pool sensor filter ───────────────────────────────────────────
-            uint32_t filter_pool_sensor_id_{0};
-            bool     filter_pool_enabled_{false};
-
-            // ── Weather station sensor pointers ─────────────────────────────
+            // ── Sensor-Zeiger (ESPHome Core 1) ───────────────────────────────
             sensor::Sensor *temperature_sensor_{nullptr};
             sensor::Sensor *humidity_sensor_{nullptr};
             sensor::Sensor *wind_gust_sensor_{nullptr};
@@ -159,28 +182,36 @@ namespace esphome
             binary_sensor::BinarySensor *battery_sensor_{nullptr};
             text_sensor::TextSensor     *sensor_id_sensor_{nullptr};
 
-            // ── Pool thermometer sensor pointers ─────────────────────────────
             sensor::Sensor *water_temperature_sensor_{nullptr};
             sensor::Sensor *pool_rssi_sensor_{nullptr};
             binary_sensor::BinarySensor *pool_battery_sensor_{nullptr};
             text_sensor::TextSensor     *pool_sensor_id_sensor_{nullptr};
 
-            // ── Debug / frame-loss counters ──────────────────────────────────
-            // Compiled out entirely when BRESSER_DEBUG_STATS=0.
+            // ── FreeRTOS – Dual-Core ──────────────────────────────────────────
+            // Queue: Core 0 (RF-Task) schreibt RawFrames,
+            //        Core 1 (ESPHome loop) liest und publiziert.
+            QueueHandle_t data_queue_{nullptr};
+            TaskHandle_t  rf_task_handle_{nullptr};
+
+            // Statische Task-Funktion (FreeRTOS braucht C-Linkage-kompatible Signatur)
+            static void rf_task_(void *arg);
+
+            // ── Debug-Zähler (volatile: von zwei Cores gelesen/geschrieben) ───
 #if BRESSER_DEBUG_STATS
-            uint32_t dbg_ok_{0};        // frames successfully decoded
-            uint32_t dbg_invalid_{0};   // frames received but CRC/decode failed
-            uint32_t dbg_timeout_{0};   // getMessage() returned without a frame
-            uint32_t dbg_weather_{0};   // weather-station frames processed
-            uint32_t dbg_pool_{0};      // pool-thermometer frames processed
-            uint32_t dbg_filtered_{0};  // frames dropped by sensor-ID filter
-            uint32_t dbg_unknown_{0};   // frames with unhandled sensor type
-            uint32_t dbg_last_stats_ms_{0};
+            volatile uint32_t dbg_ok_{0};
+            volatile uint32_t dbg_invalid_{0};
+            volatile uint32_t dbg_timeout_{0};
+            volatile uint32_t dbg_weather_{0};
+            volatile uint32_t dbg_pool_{0};
+            volatile uint32_t dbg_filtered_{0};
+            volatile uint32_t dbg_unknown_{0};
+            uint32_t dbg_last_stats_ms_{0};   // nur Core 1
 #endif
 
             CallbackManager<void(const WeatherData &)> data_callback_;
         };
 
+        // ─────────────────────────────────────────────────────────────────────
         class WeatherDataTrigger : public Trigger<WeatherData>
         {
         public:
