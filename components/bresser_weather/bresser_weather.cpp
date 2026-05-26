@@ -16,14 +16,14 @@ namespace esphome
         {
             ESP_LOGI(TAG, "Setting up Bresser Weather Sensor Receiver");
 
-            // SX1262 (und andere Chips) können beim Initialisieren mehrere
-            // Sekunden brauchen (Kalibrierung, FSK-Konfiguration). Das
-            // überschreitet den Default-TWDT-Timeout (5s) und löst einen Reset
-            // aus. Daher: loopTask für die Dauer von begin() vom TWDT abmelden.
-            TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-            esp_task_wdt_delete(current_task);
+            // SX1262-Kalibrierung kann länger als der Default-TWDT-Timeout (5s)
+            // dauern. TWDT auf 30s erhöhen statt deaktivieren – so bleibt die
+            // Absicherung gegen echte Hänger (z.B. BUSY bleibt HIGH) erhalten.
+            esp_task_wdt_config_t wdt_long  = {.timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
+            esp_task_wdt_config_t wdt_short = {.timeout_ms =  5000, .idle_core_mask = 0, .trigger_panic = true};
+            esp_task_wdt_reconfigure(&wdt_long);
             this->ws_.begin();
-            esp_task_wdt_add(current_task);
+            esp_task_wdt_reconfigure(&wdt_short);
             esp_task_wdt_reset();
 
             // Queue anlegen: RawFrame-Structs von Core 0 → Core 1
