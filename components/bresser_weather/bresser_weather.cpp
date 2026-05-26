@@ -1,6 +1,7 @@
 #include "bresser_weather.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
+#include "esp_task_wdt.h"
 
 namespace esphome
 {
@@ -14,7 +15,16 @@ namespace esphome
         void BresserWeatherComponent::setup()
         {
             ESP_LOGI(TAG, "Setting up Bresser Weather Sensor Receiver");
+
+            // SX1262 (und andere Chips) können beim Initialisieren mehrere
+            // Sekunden brauchen (Kalibrierung, FSK-Konfiguration). Das
+            // überschreitet den Default-TWDT-Timeout (5s) und löst einen Reset
+            // aus. Daher: loopTask für die Dauer von begin() vom TWDT abmelden.
+            TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+            esp_task_wdt_delete(current_task);
             this->ws_.begin();
+            esp_task_wdt_add(current_task);
+            esp_task_wdt_reset();
 
             // Queue anlegen: RawFrame-Structs von Core 0 → Core 1
             this->data_queue_ = xQueueCreate(RF_QUEUE_DEPTH, sizeof(RawFrame));
