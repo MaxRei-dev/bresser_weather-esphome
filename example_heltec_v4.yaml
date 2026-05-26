@@ -1,5 +1,5 @@
 substitutions:
-  friendly_name: "Wetterstation"
+  friendly_name: "Wetterstation heltec"
 
 esphome:
   name: "wetterstation-heltec-v4"
@@ -40,10 +40,11 @@ font:
   - file: "gfonts://Roboto"
     id: font_s
     size: 10
+    glyphs: " &%+,-./:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
   - file: "gfonts://Roboto"
     id: font_m
     size: 14
-    glyphs: "0123456789.,°%+-/ °Cmskmh"
+    glyphs: " %+,-./:°0123456789Cms"
 
 # ── OLED Display ──────────────────────────────────────────────────────────────
 #
