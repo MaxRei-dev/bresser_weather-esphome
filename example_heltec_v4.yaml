@@ -6,10 +6,6 @@ esphome:
   friendly_name: ${friendly_name}
   libraries:
     - SPI
-  # TCXO-Konfiguration für den onboard SX1262 auf Heltec V3/V4.
-  # Ohne dieses Flag bleibt BUSY dauerhaft HIGH und ws_.begin() hängt.
-  platformio_options:
-    build_flags: -DHELTEC_LORA32_V3
 
 # ── Board ─────────────────────────────────────────────────────────────────────
 #  Heltec WiFi LoRa 32 V4  →  ESP32-S3
