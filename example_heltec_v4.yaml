@@ -7,11 +7,13 @@ esphome:
   libraries:
     - SPI
   on_boot:
-    priority: 900.0
+    # MUSS über der I2C-Bus-Priorität (BUS = 1000.0) liegen, sonst läuft die
+    # I2C-Initialisierung (inkl. fehlschlagender Bus-Recovery) VOR diesem Reset.
+    priority: 1100.0
     then:
-      # OLED hard-reset: GPIO21 kurz LOW ziehen bevor der I2C-Treiber startet
-      # (priority 800). Verhindert "SCL held LOW" nach Crash-Resets, wenn der
-      # SSD1306 in einer unvollständigen I2C-Transaktion eingefroren ist.
+      # OLED hard-reset: GPIO21 kurz LOW ziehen bevor der I2C-Treiber startet.
+      # Verhindert "SCL held LOW" nach Crash-Resets, wenn der SSD1306 in einer
+      # unvollständigen I2C-Transaktion eingefroren ist und SCL festhält.
       - lambda: |-
           pinMode(21, OUTPUT);
           digitalWrite(21, LOW);
