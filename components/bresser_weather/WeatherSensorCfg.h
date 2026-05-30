@@ -71,8 +71,16 @@
 
 // Heltec WiFi LoRa 32 V3/V4: SX1262 verwendet einen TCXO an DIO3 (1.8V).
 // Ohne diesen Define bleibt BUSY dauerhaft HIGH und ws_.begin() hängt.
-// ARDUINO_HELTEC_WIFI_LORA_32_V3 wird automatisch vom Board-Define gesetzt
-// wenn board: heltec_wifi_lora_32_V3 in ESPHome verwendet wird.
+//
+// ESPHome setzt ARDUINO_HELTEC_WIFI_LORA_32_V3 NICHT automatisch – daher
+// muss HELTEC_LORA32_V3 explizit im YAML gesetzt werden:
+//
+//   esphome:
+//     platformio_options:
+//       build_flags:
+//         - -DHELTEC_LORA32_V3
+//
+// Die folgende Auto-Erkennung greift nur in reinen Arduino/PlatformIO-Projekten.
 #if defined(USE_SX1262)
   #if defined(ARDUINO_HELTEC_WIFI_LORA_32_V3) || defined(ARDUINO_heltec_wifi_lora_32_V3)
     #ifndef HELTEC_LORA32_V3

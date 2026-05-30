@@ -6,6 +6,13 @@ esphome:
   friendly_name: ${friendly_name}
   libraries:
     - SPI
+  platformio_options:
+    build_flags:
+      # Heltec V3/V4: SX1262 TCXO hängt an DIO3 (1.8 V).
+      # Ohne diesen Flag bleibt BUSY permanent HIGH und ws_.begin() hängt.
+      # ARDUINO_HELTEC_WIFI_LORA_32_V3 wird vom ESPHome-Build-System nicht
+      # automatisch gesetzt, daher muss der Flag hier explizit definiert werden.
+      - -DHELTEC_LORA32_V3
 
 # ── Board ─────────────────────────────────────────────────────────────────────
 #  Heltec WiFi LoRa 32 V4  →  ESP32-S3
