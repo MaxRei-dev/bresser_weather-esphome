@@ -8,18 +8,23 @@ esphome:
     - SPI
   on_boot:
     # MUSS über der I2C-Bus-Priorität (BUS = 1000.0) liegen, sonst läuft die
-    # I2C-Initialisierung (inkl. fehlschlagender Bus-Recovery) VOR diesem Reset.
+    # I2C-Initialisierung VOR dem Vext-Einschalten / OLED-Reset.
     priority: 1100.0
     then:
-      # OLED hard-reset: GPIO21 kurz LOW ziehen bevor der I2C-Treiber startet.
-      # Verhindert "SCL held LOW" nach Crash-Resets, wenn der SSD1306 in einer
-      # unvollständigen I2C-Transaktion eingefroren ist und SCL festhält.
+      # Heltec V4: OLED + I2C-Bus werden über Vext (GPIO36, active LOW) versorgt.
+      # Ist Vext aus, ist das Display stromlos und SCL hängt dauerhaft auf LOW
+      # ("Recovery failed: SCL is held LOW"). Daher zuerst Vext einschalten,
+      # dann das OLED über GPIO21 hart zurücksetzen – beides vor dem I2C-Start.
       - lambda: |-
-          pinMode(21, OUTPUT);
-          digitalWrite(21, LOW);
-          delay(10);
-          digitalWrite(21, HIGH);
+          pinMode(36, OUTPUT);
+          digitalWrite(36, LOW);   // Vext EIN → versorgt OLED/I2C
           delay(50);
+          pinMode(21, OUTPUT);
+          digitalWrite(21, LOW);   // OLED-Reset aktiv
+          delay(10);
+          digitalWrite(21, HIGH);  // Reset freigeben
+          delay(50);
+          ESP_LOGI("heltec", "Vext aktiviert, OLED zurückgesetzt");
   platformio_options:
     build_flags:
       # Heltec V3/V4: SX1262 TCXO hängt an DIO3 (1.8 V).
