@@ -16,6 +16,29 @@ namespace esphome
         {
             ESP_LOGI(TAG, "Setting up Bresser Weather Sensor Receiver");
 
+            // ── Radio-Diagnose ───────────────────────────────────────────────
+            // Manueller SX1262-Reset + BUSY-Status PRÜFEN, bevor die (bei
+            // Init-Fehler endlos blockierende) Library-Funktion ws_.begin()
+            // aufgerufen wird.
+            //   BUSY=LOW  → Chip antwortet, Hänger steckt in der TCXO-/Cal-Phase
+            //   BUSY=HIGH → Chip reagiert gar nicht (Power/SPI/Pin-Problem)
+#if defined(PIN_RECEIVER_RST) && defined(PIN_RECEIVER_GPIO) && defined(PIN_RECEIVER_CS)
+            pinMode(PIN_RECEIVER_CS, OUTPUT);
+            digitalWrite(PIN_RECEIVER_CS, HIGH);   // Radio deselektieren
+            pinMode(PIN_RECEIVER_GPIO, INPUT);     // BUSY
+            pinMode(PIN_RECEIVER_RST, OUTPUT);
+            digitalWrite(PIN_RECEIVER_RST, LOW);   // Reset aktiv
+            delay(2);
+            digitalWrite(PIN_RECEIVER_RST, HIGH);  // Reset freigeben
+            uint32_t t0 = millis();
+            while (digitalRead(PIN_RECEIVER_GPIO) == HIGH && (millis() - t0) < 100)
+                delay(1);
+            ESP_LOGI(TAG, "SX1262 nach Reset: BUSY=%s nach %ums (CS=%d IRQ=%d BUSY=%d RST=%d)",
+                     digitalRead(PIN_RECEIVER_GPIO) ? "HIGH (haengt!)" : "LOW (ok)",
+                     (unsigned)(millis() - t0),
+                     PIN_RECEIVER_CS, PIN_RECEIVER_IRQ, PIN_RECEIVER_GPIO, PIN_RECEIVER_RST);
+#endif
+
             // ws_.begin() (SX1262-Kalibrierung) kann weit über den TWDT-Timeout
             // dauern.  loopTask kurz aus der WDT-Überwachung nehmen, damit kein
             // Panic ausgelöst wird.  Echte Hänger nach begin() werden wieder erkannt.
