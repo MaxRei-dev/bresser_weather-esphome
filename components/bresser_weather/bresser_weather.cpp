@@ -1,6 +1,7 @@
 #include "bresser_weather.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
+#include "esp_task_wdt.h"
 
 namespace esphome
 {
@@ -15,8 +16,13 @@ namespace esphome
         {
             ESP_LOGI(TAG, "Setting up Bresser Weather Sensor Receiver");
 
-            // ws_.begin() (SX1262-Kalibrierung) läuft im rf_task_ auf Core 0,
-            // damit der loopTask auf Core 1 nicht blockiert und den WDT auslöst.
+            // ws_.begin() (SX1262-Kalibrierung) kann weit über den TWDT-Timeout
+            // dauern.  loopTask kurz aus der WDT-Überwachung nehmen, damit kein
+            // Panic ausgelöst wird.  Echte Hänger nach begin() werden wieder erkannt.
+            esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+            this->ws_.begin();
+            esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+            esp_task_wdt_reset();
 
             // Queue anlegen: RawFrame-Structs von Core 0 → Core 1
             this->data_queue_ = xQueueCreate(RF_QUEUE_DEPTH, sizeof(RawFrame));
@@ -63,10 +69,6 @@ namespace esphome
         void BresserWeatherComponent::rf_task_(void *arg)
         {
             BresserWeatherComponent *self = static_cast<BresserWeatherComponent *>(arg);
-
-            // ws_.begin() hier auf Core 0: SX1262-Kalibrierung kann >5s dauern,
-            // blockiert aber nicht den loopTask auf Core 1.
-            self->ws_.begin();
 
             for (;;)
             {
