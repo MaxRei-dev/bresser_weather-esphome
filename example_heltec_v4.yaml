@@ -6,6 +6,18 @@ esphome:
   friendly_name: ${friendly_name}
   libraries:
     - SPI
+  on_boot:
+    priority: 900.0
+    then:
+      # OLED hard-reset: GPIO21 kurz LOW ziehen bevor der I2C-Treiber startet
+      # (priority 800). Verhindert "SCL held LOW" nach Crash-Resets, wenn der
+      # SSD1306 in einer unvollständigen I2C-Transaktion eingefroren ist.
+      - lambda: |-
+          pinMode(21, OUTPUT);
+          digitalWrite(21, LOW);
+          delay(10);
+          digitalWrite(21, HIGH);
+          delay(50);
   platformio_options:
     build_flags:
       # Heltec V3/V4: SX1262 TCXO hängt an DIO3 (1.8 V).
