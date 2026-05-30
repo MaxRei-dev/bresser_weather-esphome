@@ -1,7 +1,6 @@
 #include "bresser_weather.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
-#include "esp_task_wdt.h"
 
 namespace esphome
 {
@@ -16,15 +15,8 @@ namespace esphome
         {
             ESP_LOGI(TAG, "Setting up Bresser Weather Sensor Receiver");
 
-            // SX1262-Kalibrierung kann länger als der Default-TWDT-Timeout (5s)
-            // dauern. TWDT auf 30s erhöhen statt deaktivieren – so bleibt die
-            // Absicherung gegen echte Hänger (z.B. BUSY bleibt HIGH) erhalten.
-            esp_task_wdt_config_t wdt_long  = {.timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
-            esp_task_wdt_config_t wdt_short = {.timeout_ms =  5000, .idle_core_mask = 0, .trigger_panic = true};
-            esp_task_wdt_reconfigure(&wdt_long);
-            this->ws_.begin();
-            esp_task_wdt_reconfigure(&wdt_short);
-            esp_task_wdt_reset();
+            // ws_.begin() (SX1262-Kalibrierung) läuft im rf_task_ auf Core 0,
+            // damit der loopTask auf Core 1 nicht blockiert und den WDT auslöst.
 
             // Queue anlegen: RawFrame-Structs von Core 0 → Core 1
             this->data_queue_ = xQueueCreate(RF_QUEUE_DEPTH, sizeof(RawFrame));
@@ -71,6 +63,10 @@ namespace esphome
         void BresserWeatherComponent::rf_task_(void *arg)
         {
             BresserWeatherComponent *self = static_cast<BresserWeatherComponent *>(arg);
+
+            // ws_.begin() hier auf Core 0: SX1262-Kalibrierung kann >5s dauern,
+            // blockiert aber nicht den loopTask auf Core 1.
+            self->ws_.begin();
 
             for (;;)
             {
