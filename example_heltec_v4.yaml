@@ -52,11 +52,14 @@ esp32:
 
 # ── SPI-Bus – Onboard SX1262 ──────────────────────────────────────────────────
 #  SCK=GPIO9  MOSI=GPIO10  MISO=GPIO11
+#
+#  WICHTIG: KEIN ESPHome-spi:-Block!
+#  RadioLib (in der Bresser-Library) benutzt das globale Arduino-SPI-Objekt,
+#  NICHT die ESPHome-spi:-Komponente. Der ESPHome-spi:-Block würde die Pins
+#  9/11/10 über den ESP-IDF-Treiber beanspruchen und mit Arduino-SPI kollidieren.
+#  Die korrekten Bus-Pins werden stattdessen unten unter bresser_weather: → pins:
+#  (sck/miso/mosi) übergeben und in setup() direkt an Arduino-SPI.begin() gereicht.
 # ──────────────────────────────────────────────────────────────────────────────
-spi:
-  clk_pin: GPIO9
-  miso_pin: GPIO11
-  mosi_pin: GPIO10
 
 # ── TESTWEISE DEAKTIVIERT: I2C / Schriften / Display / Interval ──────────────
 # i2c:
@@ -179,6 +182,10 @@ bresser_weather:
     irq: 14
     gpio: 13
     rst: 12
+    # SPI-Bus-Pins für RadioLib (Heltec V3/V4 Onboard-SX1262)
+    sck: 9
+    miso: 11
+    mosi: 10
 
   filter_sensor_id: 0x00008BFC
   filter_pool_sensor_id: 0x27761309

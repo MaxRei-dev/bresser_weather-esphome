@@ -2,6 +2,7 @@
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include "esp_task_wdt.h"
+#include <SPI.h>
 
 namespace esphome
 {
@@ -37,6 +38,24 @@ namespace esphome
                      digitalRead(PIN_RECEIVER_GPIO) ? "HIGH (haengt!)" : "LOW (ok)",
                      (unsigned)(millis() - t0),
                      PIN_RECEIVER_CS, PIN_RECEIVER_IRQ, PIN_RECEIVER_GPIO, PIN_RECEIVER_RST);
+#endif
+
+            // ── SPI-Bus auf die KORREKTEN Pins zwingen ───────────────────────
+            // RadioLib nutzt das globale Arduino-SPI-Objekt und ruft intern
+            // SPI.begin() OHNE Pins auf → fällt auf die ESP32-S3-Default-FSPI-Pins
+            // (SCK=12, MISO=13, MOSI=11) zurück. Pin 12/13 sind hier aber RST/BUSY!
+            // Dadurch findet keine echte SPI-Kommunikation statt und ws_.begin()
+            // hängt. Der ESPHome-spi:-Block ist eine andere (ESP-IDF-)Implementierung,
+            // die RadioLib nicht sieht.
+            // Wir initialisieren das globale Arduino-SPI vorher mit den richtigen
+            // Bus-Pins; RadioLibs späterer SPI.begin() ist dann ein No-Op (if(_spi)).
+#if defined(PIN_SPI_SCK) && defined(PIN_SPI_MISO) && defined(PIN_SPI_MOSI)
+            SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_RECEIVER_CS);
+            ESP_LOGI(TAG, "SPI vor-initialisiert: SCK=%d MISO=%d MOSI=%d CS=%d",
+                     PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_RECEIVER_CS);
+#else
+            ESP_LOGW(TAG, "Keine SPI-Bus-Pins konfiguriert (sck/miso/mosi) – "
+                          "RadioLib nutzt Default-Pins, das kann fehlschlagen!");
 #endif
 
             // ws_.begin() (SX1262-Kalibrierung) kann weit über den TWDT-Timeout

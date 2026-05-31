@@ -48,6 +48,9 @@ CONF_CS_PIN  = "cs"
 CONF_IRQ_PIN = "irq"
 CONF_GPIO_PIN = "gpio"
 CONF_RST_PIN  = "rst"
+CONF_SCK_PIN  = "sck"
+CONF_MISO_PIN = "miso"
+CONF_MOSI_PIN = "mosi"
 
 # ── Custom units (not yet in esphome.const for all ESPHome versions) ──────────
 UNIT_METER_PER_SECOND = "m/s"
@@ -86,6 +89,12 @@ CONFIG_SCHEMA = cv.Schema(
                     cv.int_range(min=-1, max=-1),
                     pins.internal_gpio_output_pin_number,
                 ),
+                # SPI-Bus-Pins für RadioLib (optional). Wenn gesetzt, wird das
+                # globale Arduino-SPI vor ws_.begin() explizit darauf initialisiert,
+                # sonst greift RadioLib auf die (oft falschen) Default-Pins zurück.
+                cv.Optional(CONF_SCK_PIN):  pins.internal_gpio_output_pin_number,
+                cv.Optional(CONF_MISO_PIN): pins.internal_gpio_input_pin_number,
+                cv.Optional(CONF_MOSI_PIN): pins.internal_gpio_output_pin_number,
             }
         ),
 
@@ -268,5 +277,12 @@ async def to_code(config):
     cg.add_build_flag(f"-DPIN_RECEIVER_IRQ={pin_config[CONF_IRQ_PIN]}")
     cg.add_build_flag(f"-DPIN_RECEIVER_GPIO={pin_config[CONF_GPIO_PIN]}")
     cg.add_build_flag(f"-DPIN_RECEIVER_RST={pin_config[CONF_RST_PIN]}")
+
+    if CONF_SCK_PIN in pin_config:
+        cg.add_build_flag(f"-DPIN_SPI_SCK={pin_config[CONF_SCK_PIN]}")
+    if CONF_MISO_PIN in pin_config:
+        cg.add_build_flag(f"-DPIN_SPI_MISO={pin_config[CONF_MISO_PIN]}")
+    if CONF_MOSI_PIN in pin_config:
+        cg.add_build_flag(f"-DPIN_SPI_MOSI={pin_config[CONF_MOSI_PIN]}")
 
     cg.add_platformio_option("lib_ldf_mode", "deep+")
