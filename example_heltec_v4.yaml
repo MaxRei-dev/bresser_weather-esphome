@@ -33,6 +33,10 @@ esphome:
       # ARDUINO_HELTEC_WIFI_LORA_32_V3 wird vom ESPHome-Build-System nicht
       # automatisch gesetzt, daher muss der Flag hier explizit definiert werden.
       - -DHELTEC_LORA32_V3
+      # Macht die internen log_e/log_d-Meldungen der BresserWeatherSensorReceiver-
+      # Library UND von RadioLib sichtbar. Ohne diesen Flag ist CORE_DEBUG_LEVEL=0,
+      # d.h. der echte Init-Fehlercode beim Hänger in ws_.begin() wird verworfen.
+      - -DCORE_DEBUG_LEVEL=5
 
 # ── Board ─────────────────────────────────────────────────────────────────────
 #  Heltec WiFi LoRa 32 V4  →  ESP32-S3

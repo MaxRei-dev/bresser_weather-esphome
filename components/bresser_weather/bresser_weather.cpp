@@ -43,7 +43,12 @@ namespace esphome
             // dauern.  loopTask kurz aus der WDT-Überwachung nehmen, damit kein
             // Panic ausgelöst wird.  Echte Hänger nach begin() werden wieder erkannt.
             esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
-            this->ws_.begin();
+            // Rückgabewert protokollieren, um echten Init-Fehler statt Stille zu sehen:
+            //   - "returned" fehlt   → RadioLib hängt in XOSC/Kalibrierung (TCXO startet nicht)
+            //   - "returned <code≠0>" → exakter RadioLib-Fehlercode
+            ESP_LOGI(TAG, "ws_.begin() start ...");
+            int16_t begin_status = this->ws_.begin();
+            ESP_LOGI(TAG, "ws_.begin() returned %d", begin_status);
             esp_task_wdt_add(xTaskGetCurrentTaskHandle());
             esp_task_wdt_reset();
 
