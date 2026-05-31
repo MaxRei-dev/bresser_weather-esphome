@@ -6,26 +6,25 @@ esphome:
   friendly_name: ${friendly_name}
   libraries:
     - SPI
-  # ── TESTWEISE DEAKTIVIERT (Display entfernt) ────────────────────────────────
-  # on_boot:
-  #   # MUSS über der I2C-Bus-Priorität (BUS = 1000.0) liegen, sonst läuft die
-  #   # I2C-Initialisierung VOR dem Vext-Einschalten / OLED-Reset.
-  #   priority: 1100.0
-  #   then:
-  #     # Heltec V4: OLED + I2C-Bus werden über Vext (GPIO36, active LOW) versorgt.
-  #     # Ist Vext aus, ist das Display stromlos und SCL hängt dauerhaft auf LOW
-  #     # ("Recovery failed: SCL is held LOW"). Daher zuerst Vext einschalten,
-  #     # dann das OLED über GPIO21 hart zurücksetzen – beides vor dem I2C-Start.
-  #     - lambda: |-
-  #         pinMode(36, OUTPUT);
-  #         digitalWrite(36, LOW);   // Vext EIN → versorgt OLED/I2C
-  #         delay(50);
-  #         pinMode(21, OUTPUT);
-  #         digitalWrite(21, LOW);   // OLED-Reset aktiv
-  #         delay(10);
-  #         digitalWrite(21, HIGH);  // Reset freigeben
-  #         delay(50);
-  #         ESP_LOGI("heltec", "Vext aktiviert, OLED zurückgesetzt");
+  on_boot:
+    # MUSS über der I2C-Bus-Priorität (BUS = 1000.0) liegen, sonst läuft die
+    # I2C-Initialisierung VOR dem Vext-Einschalten / OLED-Reset.
+    priority: 1100.0
+    then:
+      # Heltec V4: OLED + I2C-Bus werden über Vext (GPIO36, active LOW) versorgt.
+      # Ist Vext aus, ist das Display stromlos und SCL hängt dauerhaft auf LOW
+      # ("Recovery failed: SCL is held LOW"). Daher zuerst Vext einschalten,
+      # dann das OLED über GPIO21 hart zurücksetzen – beides vor dem I2C-Start.
+      - lambda: |-
+          pinMode(36, OUTPUT);
+          digitalWrite(36, LOW);   // Vext EIN → versorgt OLED/I2C
+          delay(50);
+          pinMode(21, OUTPUT);
+          digitalWrite(21, LOW);   // OLED-Reset aktiv
+          delay(10);
+          digitalWrite(21, HIGH);  // Reset freigeben
+          delay(50);
+          ESP_LOGI("heltec", "Vext aktiviert, OLED zurückgesetzt");
   platformio_options:
     build_flags:
       # Heltec V3/V4: SX1262 TCXO hängt an DIO3 (1.8 V).
@@ -61,76 +60,76 @@ esp32:
 #  (sck/miso/mosi) übergeben und in setup() direkt an Arduino-SPI.begin() gereicht.
 # ──────────────────────────────────────────────────────────────────────────────
 
-# ── TESTWEISE DEAKTIVIERT: I2C / Schriften / Display / Interval ──────────────
-# i2c:
-#   sda: GPIO17
-#   scl: GPIO18
-#   scan: false
-#
-# font:
-#   - file: "gfonts://Roboto"
-#     id: font_s
-#     size: 10
-#     glyphs: " &%+,-./:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-#   - file: "gfonts://Roboto"
-#     id: font_m
-#     size: 14
-#     glyphs: " %+,-./:°0123456789Cms"
-#
-# display:
-#   - platform: ssd1306_i2c
-#     id: display_oled
-#     model: "SSD1306 128x64"
-#     address: 0x3C
-#     reset_pin: GPIO21
-#     update_interval: 5s
-#     pages:
-#       - id: page_main
-#         lambda: |-
-#           it.print(0, 0, id(font_s), "Temperatur & Feuchte");
-#           if (!isnan(id(ws_temp).state))
-#             it.printf(0, 14, id(font_m), "%.1f°C", id(ws_temp).state);
-#           else
-#             it.print(0, 14, id(font_m), "--.-°C");
-#           if (!isnan(id(ws_humidity).state))
-#             it.printf(72, 14, id(font_m), "%.0f%%", id(ws_humidity).state);
-#           else
-#             it.print(72, 14, id(font_m), "--%");
-#           if (!isnan(id(ws_rssi).state))
-#             it.printf(0, 34, id(font_s), "RSSI: %.0f dBm", id(ws_rssi).state);
-#           if (!isnan(id(ws_pool_temp).state))
-#             it.printf(0, 50, id(font_s), "Pool: %.1f°C", id(ws_pool_temp).state);
-#
-#       - id: page_wind
-#         lambda: |-
-#           it.print(0, 0, id(font_s), "Wind");
-#           if (!isnan(id(ws_wind_speed).state)) {
-#             it.printf(0, 14, id(font_m), "%.1f m/s", id(ws_wind_speed).state);
-#           } else {
-#             it.print(0, 14, id(font_m), "-- m/s");
-#           }
-#           if (!isnan(id(ws_wind_dir).state))
-#             it.printf(0, 34, id(font_s), "Richtung: %.0f°", id(ws_wind_dir).state);
-#           if (!isnan(id(ws_wind_gust).state))
-#             it.printf(0, 50, id(font_s), "Boe: %.1f m/s", id(ws_wind_gust).state);
-#
-#       - id: page_rain
-#         lambda: |-
-#           it.print(0, 0, id(font_s), "Niederschlag");
-#           if (!isnan(id(ws_rain).state))
-#             it.printf(0, 14, id(font_m), "%.1f mm", id(ws_rain).state);
-#           else
-#             it.print(0, 14, id(font_m), "-- mm");
-#           if (!isnan(id(ws_uv).state))
-#             it.printf(0, 34, id(font_s), "UV: %.1f", id(ws_uv).state);
-#           if (!isnan(id(ws_light).state))
-#             it.printf(64, 34, id(font_s), "%.0f lx", id(ws_light).state);
-#
-# interval:
-#   - interval: 5s
-#     then:
-#       - display.page.show_next: display_oled
-#       - component.update: display_oled
+# ── I2C / Schriften / Display / Interval ─────────────────────────────────────
+i2c:
+  sda: GPIO17
+  scl: GPIO18
+  scan: false
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_s
+    size: 10
+    glyphs: " &%+,-./:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Roboto"
+    id: font_m
+    size: 14
+    glyphs: " %+,-./:°0123456789Cms"
+
+display:
+  - platform: ssd1306_i2c
+    id: display_oled
+    model: "SSD1306 128x64"
+    address: 0x3C
+    reset_pin: GPIO21
+    update_interval: 5s
+    pages:
+      - id: page_main
+        lambda: |-
+          it.print(0, 0, id(font_s), "Temperatur & Feuchte");
+          if (!isnan(id(ws_temp).state))
+            it.printf(0, 14, id(font_m), "%.1f°C", id(ws_temp).state);
+          else
+            it.print(0, 14, id(font_m), "--.-°C");
+          if (!isnan(id(ws_humidity).state))
+            it.printf(72, 14, id(font_m), "%.0f%%", id(ws_humidity).state);
+          else
+            it.print(72, 14, id(font_m), "--%");
+          if (!isnan(id(ws_rssi).state))
+            it.printf(0, 34, id(font_s), "RSSI: %.0f dBm", id(ws_rssi).state);
+          if (!isnan(id(ws_pool_temp).state))
+            it.printf(0, 50, id(font_s), "Pool: %.1f°C", id(ws_pool_temp).state);
+
+      - id: page_wind
+        lambda: |-
+          it.print(0, 0, id(font_s), "Wind");
+          if (!isnan(id(ws_wind_speed).state)) {
+            it.printf(0, 14, id(font_m), "%.1f m/s", id(ws_wind_speed).state);
+          } else {
+            it.print(0, 14, id(font_m), "-- m/s");
+          }
+          if (!isnan(id(ws_wind_dir).state))
+            it.printf(0, 34, id(font_s), "Richtung: %.0f°", id(ws_wind_dir).state);
+          if (!isnan(id(ws_wind_gust).state))
+            it.printf(0, 50, id(font_s), "Boe: %.1f m/s", id(ws_wind_gust).state);
+
+      - id: page_rain
+        lambda: |-
+          it.print(0, 0, id(font_s), "Niederschlag");
+          if (!isnan(id(ws_rain).state))
+            it.printf(0, 14, id(font_m), "%.1f mm", id(ws_rain).state);
+          else
+            it.print(0, 14, id(font_m), "-- mm");
+          if (!isnan(id(ws_uv).state))
+            it.printf(0, 34, id(font_s), "UV: %.1f", id(ws_uv).state);
+          if (!isnan(id(ws_light).state))
+            it.printf(64, 34, id(font_s), "%.0f lx", id(ws_light).state);
+
+interval:
+  - interval: 5s
+    then:
+      - display.page.show_next: display_oled
+      - component.update: display_oled
 
 external_components:
   - source: github://MaxRei-dev/bresser_weather-esphome@main
