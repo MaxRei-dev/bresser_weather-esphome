@@ -27,11 +27,14 @@ esphome:
           ESP_LOGI("heltec", "Vext aktiviert, OLED zurückgesetzt");
   platformio_options:
     build_flags:
-      # Heltec V3/V4: SX1262 TCXO hängt an DIO3 (1.8 V).
-      # Ohne diesen Flag bleibt BUSY permanent HIGH und ws_.begin() hängt.
-      # ARDUINO_HELTEC_WIFI_LORA_32_V3 wird vom ESPHome-Build-System nicht
-      # automatisch gesetzt, daher muss der Flag hier explizit definiert werden.
-      - -DHELTEC_LORA32_V3
+      # Aktiviert in WeatherSensor.cpp::begin() für die Heltec WiFi LoRa 32 (V4):
+      #   - radio.setTCXO(1.8) + setDio2AsRfSwitch(true)  → TCXO an DIO3 (1.8 V)
+      #   - femEnable() (GPIO7/GPIO2)                      → Front-End-Modul/RF-Switch
+      # WICHTIG: Die Library prüft GENAU dieses Makro. Das frühere -DHELTEC_LORA32_V3
+      # wurde nirgends ausgewertet (No-Op) → TCXO wurde nie konfiguriert, begin() hing.
+      # Auch das vom Board automatisch gesetzte ARDUINO_HELTEC_WIFI_LORA_32_V3
+      # triggert WEDER TCXO NOCH FEM – deshalb explizit das V4-Makro setzen.
+      - -DARDUINO_HELTEC_WIFI_LORA_32_V4
       # Macht die internen log_e/log_d-Meldungen der BresserWeatherSensorReceiver-
       # Library UND von RadioLib sichtbar. Ohne diesen Flag ist CORE_DEBUG_LEVEL=0,
       # d.h. der echte Init-Fehlercode beim Hänger in ws_.begin() wird verworfen.

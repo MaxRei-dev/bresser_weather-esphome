@@ -69,20 +69,22 @@
 #pragma message("No radio chip selected!")
 #endif
 
-// Heltec WiFi LoRa 32 V3/V4: SX1262 verwendet einen TCXO an DIO3 (1.8V).
-// Ohne diesen Define bleibt BUSY während der Kalibrierung dauerhaft HIGH und
-// ws_.begin() hängt für immer (Chip antwortet zwar auf Reset, der Oszillator
-// startet aber nie, weil der TCXO keinen Strom bekommt).
+// Heltec WiFi LoRa 32 (V3/V4): SX1262 verwendet einen TCXO an DIO3 (1.8 V).
+// Ohne korrekte Aktivierung bleibt BUSY während der Kalibrierung dauerhaft HIGH
+// und ws_.begin() hängt (Chip antwortet zwar auf Reset, der Oszillator startet
+// aber nie, weil der TCXO keinen Strom bekommt).
 //
-// Diese Config-Datei wird per pre_build.py in die Library kopiert und erzwingt
-// deren Neukompilierung. Daher definieren wir HELTEC_LORA32_V3 hier direkt und
-// bedingungslos für SX1262 – unabhängig von Build-Flags oder Board-Macros, die
-// ESPHome nicht zuverlässig durchreicht.
-#if defined(USE_SX1262)
-  #ifndef HELTEC_LORA32_V3
-  #define HELTEC_LORA32_V3
-  #endif
-#endif
+// ACHTUNG: WeatherSensor.cpp::begin() wertet für TCXO + Front-End-Modul (FEM)
+// AUSSCHLIESSLICH das Makro ARDUINO_HELTEC_WIFI_LORA_32_V4 (bzw.
+// HELTEC_WIRELESS_STICK_LITE_V3) aus – NICHT das früher hier gesetzte
+// HELTEC_LORA32_V3 (das war ein No-Op) und auch NICHT das vom Board automatisch
+// gesetzte ARDUINO_HELTEC_WIFI_LORA_32_V3.
+//
+// Das V4-Makro wird daher als Build-Flag in der YAML gesetzt
+// (-DARDUINO_HELTEC_WIFI_LORA_32_V4), damit es ALLE Library-Übersetzungseinheiten
+// erreicht. Die SPI-Bus-Pins kommen über bresser_weather: → pins: (sck/miso/mosi)
+// und werden in bresser_weather.cpp vor ws_.begin() an SPI.begin() gereicht
+// (der V4-Pfad nutzt das Default-SPI, daher ist diese Vor-Initialisierung nötig).
 
 
 // ------------------------------------------------------------------------------------------------

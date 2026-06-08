@@ -263,7 +263,7 @@ async def to_code(config):
         await automation.build_automation(trigger, [(WeatherData, "x")], conf)
 
     # ── Library dependencies ──────────────────────────────────────────────────
-    cg.add_platformio_option("lib_deps", ["matthias-bs/BresserWeatherSensorReceiver@0.39.3"])
+    cg.add_platformio_option("lib_deps", ["matthias-bs/BresserWeatherSensorReceiver@0.41.0"])
     cg.add_platformio_option("lib_deps", ["jgromes/RadioLib@7.6.0"])
     cg.add_platformio_option("lib_deps", ["vshymanskyy/Preferences@2.2.2"])
     cg.add_platformio_option("lib_deps", ["bblanchon/ArduinoJson@7.4.3"])
