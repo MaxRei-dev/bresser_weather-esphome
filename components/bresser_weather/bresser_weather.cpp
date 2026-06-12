@@ -17,29 +17,6 @@ namespace esphome
         {
             ESP_LOGI(TAG, "Setting up Bresser Weather Sensor Receiver");
 
-            // ── Radio-Diagnose ───────────────────────────────────────────────
-            // Manueller SX1262-Reset + BUSY-Status PRÜFEN, bevor die (bei
-            // Init-Fehler endlos blockierende) Library-Funktion ws_.begin()
-            // aufgerufen wird.
-            //   BUSY=LOW  → Chip antwortet, Hänger steckt in der TCXO-/Cal-Phase
-            //   BUSY=HIGH → Chip reagiert gar nicht (Power/SPI/Pin-Problem)
-#if defined(PIN_RECEIVER_RST) && defined(PIN_RECEIVER_GPIO) && defined(PIN_RECEIVER_CS)
-            pinMode(PIN_RECEIVER_CS, OUTPUT);
-            digitalWrite(PIN_RECEIVER_CS, HIGH);   // Radio deselektieren
-            pinMode(PIN_RECEIVER_GPIO, INPUT);     // BUSY
-            pinMode(PIN_RECEIVER_RST, OUTPUT);
-            digitalWrite(PIN_RECEIVER_RST, LOW);   // Reset aktiv
-            delay(2);
-            digitalWrite(PIN_RECEIVER_RST, HIGH);  // Reset freigeben
-            uint32_t t0 = millis();
-            while (digitalRead(PIN_RECEIVER_GPIO) == HIGH && (millis() - t0) < 100)
-                delay(1);
-            ESP_LOGI(TAG, "SX1262 nach Reset: BUSY=%s nach %ums (CS=%d IRQ=%d BUSY=%d RST=%d)",
-                     digitalRead(PIN_RECEIVER_GPIO) ? "HIGH (haengt!)" : "LOW (ok)",
-                     (unsigned)(millis() - t0),
-                     PIN_RECEIVER_CS, PIN_RECEIVER_IRQ, PIN_RECEIVER_GPIO, PIN_RECEIVER_RST);
-#endif
-
             // ── SPI-Bus auf die KORREKTEN Pins zwingen ───────────────────────
             // RadioLib nutzt das globale Arduino-SPI-Objekt und ruft intern
             // SPI.begin() OHNE Pins auf → fällt auf die ESP32-S3-Default-FSPI-Pins
@@ -62,12 +39,9 @@ namespace esphome
             // dauern.  loopTask kurz aus der WDT-Überwachung nehmen, damit kein
             // Panic ausgelöst wird.  Echte Hänger nach begin() werden wieder erkannt.
             esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
-            // Rückgabewert protokollieren, um echten Init-Fehler statt Stille zu sehen:
-            //   - "returned" fehlt   → RadioLib hängt in XOSC/Kalibrierung (TCXO startet nicht)
-            //   - "returned <code≠0>" → exakter RadioLib-Fehlercode
-            ESP_LOGI(TAG, "ws_.begin() start ...");
+            ESP_LOGD(TAG, "ws_.begin() start ...");
             int16_t begin_status = this->ws_.begin();
-            ESP_LOGI(TAG, "ws_.begin() returned %d", begin_status);
+            ESP_LOGD(TAG, "ws_.begin() returned %d", begin_status);
             esp_task_wdt_add(xTaskGetCurrentTaskHandle());
             esp_task_wdt_reset();
 
