@@ -74,7 +74,29 @@ RADIO_TYPES = {
     "lr1121": "LR1121",
 }
 
-CONFIG_SCHEMA = cv.Schema(
+# Alle unterstützten Radios werden von RadioLib über SPI angesprochen.
+_SPI_PIN_KEYS = (CONF_SCK_PIN, CONF_MISO_PIN, CONF_MOSI_PIN)
+
+
+def _validate_spi_pins(config):
+    """RadioLib übernimmt die SPI-Pins NICHT aus dem ESPHome 'spi:'-Block.
+    Fehlen sie, greift RadioLib auf (oft falsche) Default-Pins zurück und der
+    Radio-Init hängt erst zur Laufzeit. Daher hier schon zur Compile-Zeit prüfen.
+    """
+    pin_config = config[CONF_PINS]
+    missing = [k for k in _SPI_PIN_KEYS if k not in pin_config]
+    if missing and config[CONF_RADIO] in RADIO_TYPES:
+        raise cv.Invalid(
+            f"Das Radio '{config[CONF_RADIO]}' wird von RadioLib über SPI angesprochen, "
+            f"aber RadioLib übernimmt die Pins NICHT aus dem ESPHome 'spi:'-Block. "
+            f"Bitte 'sck', 'miso' und 'mosi' unter 'pins:' angeben "
+            f"(fehlend: {', '.join(missing)})."
+        )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(BresserWeatherComponent),
 
@@ -178,7 +200,9 @@ CONFIG_SCHEMA = cv.Schema(
             }
         ),
     }
-).extend(cv.COMPONENT_SCHEMA)
+    ).extend(cv.COMPONENT_SCHEMA),
+    _validate_spi_pins,
+)
 
 
 async def to_code(config):

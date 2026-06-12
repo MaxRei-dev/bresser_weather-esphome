@@ -71,6 +71,17 @@ namespace esphome
             esp_task_wdt_add(xTaskGetCurrentTaskHandle());
             esp_task_wdt_reset();
 
+            // Radio-Init fehlgeschlagen? Dann KEINEN RF-Task starten – der würde
+            // sonst auf Core 0 endlos getMessage() auf einem toten Radio aufrufen
+            // und CPU verbrennen, ohne je etwas zu empfangen.
+            if (begin_status != 0)   // RADIOLIB_ERR_NONE == 0
+            {
+                ESP_LOGE(TAG, "Radio-Init fehlgeschlagen (code=%d) – Komponente deaktiviert",
+                         begin_status);
+                this->mark_failed();
+                return;
+            }
+
             // Queue anlegen: RawFrame-Structs von Core 0 → Core 1
             this->data_queue_ = xQueueCreate(RF_QUEUE_DEPTH, sizeof(RawFrame));
             if (this->data_queue_ == nullptr)
@@ -104,6 +115,46 @@ namespace esphome
             ESP_LOGI(TAG, "RF-Task gestartet auf Core %d  Prio=%d  Queue=%d  Stats=aus",
                      RF_TASK_CORE, RF_TASK_PRIORITY, RF_QUEUE_DEPTH);
 #endif
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // dump_config()  –  Boot-Ausgabe der aktiven Konfiguration
+        //
+        // Macht die Pin-Belegung (inkl. SPI-Bus) auf einen Blick sichtbar – genau
+        // die Verwechslung, die uns den Radio-Hänger beschert hat.
+        // ═════════════════════════════════════════════════════════════════════
+        void BresserWeatherComponent::dump_config()
+        {
+            ESP_LOGCONFIG(TAG, "Bresser Weather Sensor Receiver:");
+#if defined(RECEIVER_CHIP)
+            ESP_LOGCONFIG(TAG, "  Radio-Chip: %s", RECEIVER_CHIP);
+#endif
+#if defined(PIN_RECEIVER_CS) && defined(PIN_RECEIVER_IRQ) && \
+    defined(PIN_RECEIVER_GPIO) && defined(PIN_RECEIVER_RST)
+            ESP_LOGCONFIG(TAG, "  Control-Pins: CS=%d IRQ=%d BUSY=%d RST=%d",
+                          PIN_RECEIVER_CS, PIN_RECEIVER_IRQ,
+                          PIN_RECEIVER_GPIO, PIN_RECEIVER_RST);
+#endif
+#if defined(PIN_SPI_SCK) && defined(PIN_SPI_MISO) && defined(PIN_SPI_MOSI)
+            ESP_LOGCONFIG(TAG, "  SPI-Bus-Pins: SCK=%d MISO=%d MOSI=%d",
+                          PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
+#else
+            ESP_LOGCONFIG(TAG, "  SPI-Bus-Pins: NICHT gesetzt (RadioLib nutzt Default-Pins!)");
+#endif
+            if (this->filter_enabled_)
+                ESP_LOGCONFIG(TAG, "  Filter Wetterstation: ID=0x%08X",
+                              (unsigned int)this->filter_sensor_id_);
+            else
+                ESP_LOGCONFIG(TAG, "  Filter Wetterstation: aus (alle IDs)");
+
+            if (this->filter_pool_enabled_)
+                ESP_LOGCONFIG(TAG, "  Filter Pool-Thermometer: ID=0x%08X",
+                              (unsigned int)this->filter_pool_sensor_id_);
+            else
+                ESP_LOGCONFIG(TAG, "  Filter Pool-Thermometer: aus (alle IDs)");
+
+            if (this->is_failed())
+                ESP_LOGE(TAG, "  Status: FEHLER – Radio-Init fehlgeschlagen");
         }
 
         // ═════════════════════════════════════════════════════════════════════
