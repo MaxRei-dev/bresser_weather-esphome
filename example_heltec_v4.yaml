@@ -168,6 +168,43 @@ sensor:
   - platform: internal_temperature
     name: "${friendly_name} Internal Temperature"
 
+  # ── AHT20 + BMP280 Kombi-Modul (gemeinsamer I2C-Bus mit dem OLED) ────────────
+  #  AHT20:  Temperatur + Luftfeuchte   @ 0x38
+  #  BMP280: Luftdruck + Temperatur     @ 0x77 (manche Module: 0x76)
+  # ─────────────────────────────────────────────────────────────────────────────
+  - platform: aht10
+    variant: AHT20
+    update_interval: 60s
+    temperature:
+      id: lokal_temp
+      name: "${friendly_name} Lokal Temperatur"
+      device_class: "temperature"
+      state_class: "measurement"
+      unit_of_measurement: "°C"
+    humidity:
+      id: lokal_humidity
+      name: "${friendly_name} Lokal Luftfeuchtigkeit"
+      device_class: "humidity"
+      state_class: "measurement"
+      unit_of_measurement: "%"
+
+  - platform: bmp280_i2c
+    address: 0x77
+    update_interval: 60s
+    pressure:
+      id: lokal_pressure
+      name: "${friendly_name} Lokal Luftdruck"
+      device_class: "atmospheric_pressure"
+      state_class: "measurement"
+      unit_of_measurement: "hPa"
+    temperature:
+      id: lokal_temp_bmp
+      name: "${friendly_name} Lokal Temperatur (BMP280)"
+      device_class: "temperature"
+      state_class: "measurement"
+      unit_of_measurement: "°C"
+      entity_category: "diagnostic"
+
 button:
   - platform: restart
     name: "${friendly_name} Restart"
