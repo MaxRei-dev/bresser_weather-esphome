@@ -64,14 +64,23 @@ esp32:
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── I2C / Schriften / Display / Interval ─────────────────────────────────────
+# Zwei getrennte Busse: das OLED bleibt auf 17/18, das AHT20+BMP280-Modul kommt
+# auf 41/42 (näher an GND/VCC, keine Strapping-Pins). Bei mehreren Bussen MUSS
+# jedes I2C-Gerät per i2c_id den Bus angeben.
 i2c:
-  sda: GPIO17
-  scl: GPIO18
-  scan: false
-  # SSD1306 verträgt 400 kHz problemlos. Default ist 50 kHz – damit dauert ein
-  # voller Framebuffer-Flush (~1 KB) ~160 ms und löst die "display/interval took
-  # a long time"-Warnungen aus. Bei 400 kHz sinkt das auf ~20 ms.
-  frequency: 400kHz
+  - id: bus_oled
+    sda: GPIO17
+    scl: GPIO18
+    scan: false
+    # SSD1306 verträgt 400 kHz problemlos. Default ist 50 kHz – damit dauert ein
+    # voller Framebuffer-Flush (~1 KB) ~160 ms und löst die "display/interval took
+    # a long time"-Warnungen aus. Bei 400 kHz sinkt das auf ~20 ms.
+    frequency: 400kHz
+  - id: bus_sensors
+    sda: GPIO41          # frei, kein Strapping-Pin (Default-JTAG MTDI, hier ungenutzt)
+    scl: GPIO42          # frei, kein Strapping-Pin (Default-JTAG MTMS, hier ungenutzt)
+    scan: true           # listet beim Boot die gefundenen Adressen (BMP280 0x76/0x77 prüfen)
+    frequency: 400kHz
 
 font:
   - file: "gfonts://Roboto"
@@ -86,6 +95,7 @@ font:
 display:
   - platform: ssd1306_i2c
     id: display_oled
+    i2c_id: bus_oled
     model: "SSD1306 128x64"
     address: 0x3C
     reset_pin: GPIO21
@@ -168,11 +178,12 @@ sensor:
   - platform: internal_temperature
     name: "${friendly_name} Internal Temperature"
 
-  # ── AHT20 + BMP280 Kombi-Modul (gemeinsamer I2C-Bus mit dem OLED) ────────────
+  # ── AHT20 + BMP280 Kombi-Modul (eigener I2C-Bus auf GPIO45/46) ───────────────
   #  AHT20:  Temperatur + Luftfeuchte   @ 0x38
   #  BMP280: Luftdruck + Temperatur     @ 0x77 (manche Module: 0x76)
   # ─────────────────────────────────────────────────────────────────────────────
   - platform: aht10
+    i2c_id: bus_sensors
     variant: AHT20
     update_interval: 60s
     temperature:
@@ -189,6 +200,7 @@ sensor:
       unit_of_measurement: "%"
 
   - platform: bmp280_i2c
+    i2c_id: bus_sensors
     address: 0x77
     update_interval: 60s
     pressure:
