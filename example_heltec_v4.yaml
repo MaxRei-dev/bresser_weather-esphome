@@ -68,6 +68,10 @@ i2c:
   sda: GPIO17
   scl: GPIO18
   scan: false
+  # SSD1306 verträgt 400 kHz problemlos. Default ist 50 kHz – damit dauert ein
+  # voller Framebuffer-Flush (~1 KB) ~160 ms und löst die "display/interval took
+  # a long time"-Warnungen aus. Bei 400 kHz sinkt das auf ~20 ms.
+  frequency: 400kHz
 
 font:
   - file: "gfonts://Roboto"
