@@ -1,0 +1,281 @@
+substitutions:
+  friendly_name: "Wetterstation heltec"
+
+esphome:
+  name: "wetterstation-heltec-v4"
+  friendly_name: ${friendly_name}
+  libraries:
+    - SPI
+  on_boot:
+    # MUSS über der I2C-Bus-Priorität (BUS = 1000.0) liegen, sonst läuft die
+    # I2C-Initialisierung VOR dem Vext-Einschalten / OLED-Reset.
+    priority: 1100.0
+    then:
+      # Heltec V4: OLED + I2C-Bus werden über Vext (GPIO36, active LOW) versorgt.
+      # Ist Vext aus, ist das Display stromlos und SCL hängt dauerhaft auf LOW
+      # ("Recovery failed: SCL is held LOW"). Daher zuerst Vext einschalten,
+      # dann das OLED über GPIO21 hart zurücksetzen – beides vor dem I2C-Start.
+      - lambda: |-
+          pinMode(36, OUTPUT);
+          digitalWrite(36, LOW);   // Vext EIN → versorgt OLED/I2C
+          delay(50);
+          pinMode(21, OUTPUT);
+          digitalWrite(21, LOW);   // OLED-Reset aktiv
+          delay(10);
+          digitalWrite(21, HIGH);  // Reset freigeben
+          delay(50);
+          ESP_LOGI("heltec", "Vext aktiviert, OLED zurückgesetzt");
+  platformio_options:
+    build_flags:
+      # Aktiviert in WeatherSensor.cpp::begin() für die Heltec WiFi LoRa 32 (V4):
+      #   - radio.setTCXO(1.8) + setDio2AsRfSwitch(true)  → TCXO an DIO3 (1.8 V)
+      #   - femEnable() (GPIO7/GPIO2)                      → Front-End-Modul/RF-Switch
+      # WICHTIG: Die Library prüft GENAU dieses Makro. Das frühere -DHELTEC_LORA32_V3
+      # wurde nirgends ausgewertet (No-Op) → TCXO wurde nie konfiguriert, begin() hing.
+      # Auch das vom Board automatisch gesetzte ARDUINO_HELTEC_WIFI_LORA_32_V3
+      # triggert WEDER TCXO NOCH FEM – deshalb explizit das V4-Makro setzen.
+      - -DARDUINO_HELTEC_WIFI_LORA_32_V4
+      # Hinweis: Zur Tiefen-Diagnose von Radio-/Init-Problemen hier temporär
+      # `- -DCORE_DEBUG_LEVEL=5` ergänzen – macht die internen log_e/log_d-Meldungen
+      # der BresserWeatherSensorReceiver-Library und von RadioLib sichtbar.
+      # Im Normalbetrieb weglassen (sonst sehr gesprächiges Log).
+
+# ── Board ─────────────────────────────────────────────────────────────────────
+#  Heltec WiFi LoRa 32 V4  →  ESP32-S3
+#  V4 und V3 sind beide ESP32-S3; heltec_wifi_lora_32_V3 als Board-Definition
+#  verwenden bis eine spezifische V4-Definition verfügbar ist.
+# ──────────────────────────────────────────────────────────────────────────────
+esp32:
+  board: heltec_wifi_lora_32_V3
+  variant: ESP32S3
+  framework:
+    type: arduino
+    version: 3.3.6
+
+# ── SPI-Bus – Onboard SX1262 ──────────────────────────────────────────────────
+#  SCK=GPIO9  MOSI=GPIO10  MISO=GPIO11
+#
+#  WICHTIG: KEIN ESPHome-spi:-Block!
+#  RadioLib (in der Bresser-Library) benutzt das globale Arduino-SPI-Objekt,
+#  NICHT die ESPHome-spi:-Komponente. Der ESPHome-spi:-Block würde die Pins
+#  9/11/10 über den ESP-IDF-Treiber beanspruchen und mit Arduino-SPI kollidieren.
+#  Die korrekten Bus-Pins werden stattdessen unten unter bresser_weather: → pins:
+#  (sck/miso/mosi) übergeben und in setup() direkt an Arduino-SPI.begin() gereicht.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── I2C / Schriften / Display / Interval ─────────────────────────────────────
+# Nur ein I2C-Bus für das OLED (kein lokales AHT20/BMP280-Modul in dieser Variante).
+i2c:
+  sda: GPIO17
+  scl: GPIO18
+  scan: false
+  # SSD1306 verträgt 400 kHz problemlos. Default ist 50 kHz – damit dauert ein
+  # voller Framebuffer-Flush (~1 KB) ~160 ms und löst die "display/interval took
+  # a long time"-Warnungen aus. Bei 400 kHz sinkt das auf ~20 ms.
+  frequency: 400kHz
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_s
+    size: 10
+    glyphs: " &%+,-./:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Roboto"
+    id: font_m
+    size: 14
+    glyphs: " %+,-./:°0123456789Cms"
+
+display:
+  - platform: ssd1306_i2c
+    id: display_oled
+    model: "SSD1306 128x64"
+    address: 0x3C
+    reset_pin: GPIO21
+    update_interval: 5s
+    pages:
+      - id: page_main
+        lambda: |-
+          it.print(0, 0, id(font_s), "Temperatur & Feuchte");
+          if (!isnan(id(ws_temp).state))
+            it.printf(0, 14, id(font_m), "%.1f°C", id(ws_temp).state);
+          else
+            it.print(0, 14, id(font_m), "--.-°C");
+          if (!isnan(id(ws_humidity).state))
+            it.printf(72, 14, id(font_m), "%.0f%%", id(ws_humidity).state);
+          else
+            it.print(72, 14, id(font_m), "--%");
+          if (!isnan(id(ws_rssi).state))
+            it.printf(0, 34, id(font_s), "RSSI: %.0f dBm", id(ws_rssi).state);
+          if (!isnan(id(ws_pool_temp).state))
+            it.printf(0, 50, id(font_s), "Pool: %.1f°C", id(ws_pool_temp).state);
+
+      - id: page_wind
+        lambda: |-
+          it.print(0, 0, id(font_s), "Wind");
+          if (!isnan(id(ws_wind_speed).state)) {
+            it.printf(0, 14, id(font_m), "%.1f m/s", id(ws_wind_speed).state);
+          } else {
+            it.print(0, 14, id(font_m), "-- m/s");
+          }
+          if (!isnan(id(ws_wind_dir).state))
+            it.printf(0, 34, id(font_s), "Richtung: %.0f°", id(ws_wind_dir).state);
+          if (!isnan(id(ws_wind_gust).state))
+            it.printf(0, 50, id(font_s), "Boe: %.1f m/s", id(ws_wind_gust).state);
+
+      - id: page_rain
+        lambda: |-
+          it.print(0, 0, id(font_s), "Niederschlag");
+          if (!isnan(id(ws_rain).state))
+            it.printf(0, 14, id(font_m), "%.1f mm", id(ws_rain).state);
+          else
+            it.print(0, 14, id(font_m), "-- mm");
+          if (!isnan(id(ws_uv).state))
+            it.printf(0, 34, id(font_s), "UV: %.1f", id(ws_uv).state);
+          if (!isnan(id(ws_light).state))
+            it.printf(64, 34, id(font_s), "%.0f lx", id(ws_light).state);
+
+interval:
+  - interval: 5s
+    then:
+      - display.page.show_next: display_oled
+      - component.update: display_oled
+
+external_components:
+  - source: github://MaxRei-dev/bresser_weather-esphome@main
+    refresh: 0s
+    components: [bresser_weather]
+
+logger:
+  level: DEBUG
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  power_save_mode: none
+  domain: !secret domain
+
+sensor:
+  - platform: internal_temperature
+    name: "${friendly_name} Internal Temperature"
+
+button:
+  - platform: restart
+    name: "${friendly_name} Restart"
+
+# ── Bresser Wetterstation ──────────────────────────────────────────────────────
+#
+#  Onboard SX1262 Pin-Belegung (Heltec V3/V4):
+#    NSS  = GPIO8   → cs
+#    DIO1 = GPIO14  → irq
+#    BUSY = GPIO13  → gpio
+#    RST  = GPIO12  → rst
+#
+# ──────────────────────────────────────────────────────────────────────────────
+bresser_weather:
+  radio: sx1262
+  pins:
+    cs: 8
+    irq: 14
+    gpio: 13
+    rst: 12
+    # SPI-Bus-Pins für RadioLib (Heltec V3/V4 Onboard-SX1262)
+    sck: 9
+    miso: 11
+    mosi: 10
+
+  filter_sensor_id: 0x00008BFC
+  filter_pool_sensor_id: 0x27761309
+
+  # Wetterstation
+  temperature:
+    id: ws_temp
+    name: "${friendly_name} Temperatur"
+    device_class: "temperature"
+    state_class: "measurement"
+    unit_of_measurement: "°C"
+  humidity:
+    id: ws_humidity
+    name: "${friendly_name} Luftfeuchtigkeit"
+    device_class: "humidity"
+    state_class: "measurement"
+    unit_of_measurement: "%"
+  wind_gust:
+    id: ws_wind_gust
+    name: "${friendly_name} Windböe"
+    state_class: "measurement"
+    unit_of_measurement: "m/s"
+  wind_speed:
+    id: ws_wind_speed
+    name: "${friendly_name} Windgeschwindigkeit"
+    device_class: "wind_speed"
+    state_class: "measurement"
+    unit_of_measurement: "m/s"
+  wind_direction:
+    id: ws_wind_dir
+    name: "${friendly_name} Windrichtung"
+    device_class: "wind_direction"
+    unit_of_measurement: "°"
+  rain:
+    id: ws_rain
+    name: "${friendly_name} Regenmenge"
+    device_class: "precipitation"
+    state_class: "total_increasing"
+    unit_of_measurement: "mm"
+  uv:
+    id: ws_uv
+    name: "${friendly_name} UV Index"
+    state_class: "measurement"
+  light:
+    id: ws_light
+    name: "${friendly_name} Helligkeit"
+    device_class: "illuminance"
+    state_class: "measurement"
+    unit_of_measurement: "lx"
+    filters:
+      - multiply: 1000
+  rssi:
+    id: ws_rssi
+    name: "${friendly_name} RSSI"
+    device_class: "signal_strength"
+    state_class: "measurement"
+    unit_of_measurement: "dBm"
+    entity_category: "diagnostic"
+  battery_ok:
+    name: "${friendly_name} Batterie Status"
+    device_class: "battery"
+    entity_category: "diagnostic"
+  sensor_id:
+    name: "${friendly_name} Sensor ID"
+    entity_category: "diagnostic"
+
+  # Pool Sensor
+  water_temperature:
+    id: ws_pool_temp
+    name: "${friendly_name} Pool Wassertemperatur"
+    device_class: "temperature"
+    state_class: "measurement"
+    unit_of_measurement: "°C"
+  pool_rssi:
+    name: "${friendly_name} Pool RSSI"
+    device_class: "signal_strength"
+    state_class: "measurement"
+    unit_of_measurement: "dBm"
+    entity_category: "diagnostic"
+  pool_battery_ok:
+    name: "${friendly_name} Pool Batterie Status"
+    device_class: "battery"
+    entity_category: "diagnostic"
+  pool_sensor_id:
+    name: "${friendly_name} Pool Sensor ID"
+    entity_category: "diagnostic"
