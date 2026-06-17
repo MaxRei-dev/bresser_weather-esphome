@@ -9,7 +9,6 @@ from esphome.const import (
     CONF_HUMIDITY,
     CONF_TRIGGER_ID,
     CONF_ON_VALUE,
-    CONF_FORCE_UPDATE,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_HUMIDITY,
     DEVICE_CLASS_BATTERY,
@@ -79,18 +78,6 @@ RADIO_TYPES = {
 _SPI_PIN_KEYS = (CONF_SCK_PIN, CONF_MISO_PIN, CONF_MOSI_PIN)
 
 
-def _numeric_sensor_schema(**kwargs):
-    """sensor_schema() akzeptiert kein 'force_update'-Argument – force_update ist
-    ein Eintrag im Basis-Sensor-Schema (per YAML setzbar). Wir setzen den Default
-    daher per .extend() auf True, damit HA bei jedem empfangenen Paket
-    'last_updated' aktualisiert (nicht nur bei Wertänderung). Pro Sensor in der
-    YAML weiterhin via 'force_update: false' überschreibbar.
-    """
-    return sensor.sensor_schema(**kwargs).extend(
-        {cv.Optional(CONF_FORCE_UPDATE, default=True): cv.boolean}
-    )
-
-
 def _validate_spi_pins(config):
     """RadioLib übernimmt die SPI-Pins NICHT aus dem ESPHome 'spi:'-Block.
     Fehlen sie, greift RadioLib auf (oft falsche) Default-Pins zurück und der
@@ -134,48 +121,48 @@ CONFIG_SCHEMA = cv.All(
         ),
 
         # ── Weather station sensors ───────────────────────────────────────────
-        cv.Optional(CONF_TEMPERATURE): _numeric_sensor_schema(
+        cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_HUMIDITY): _numeric_sensor_schema(
+        cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
             unit_of_measurement=UNIT_PERCENT,
             accuracy_decimals=0,
             device_class=DEVICE_CLASS_HUMIDITY,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_WIND_GUST): _numeric_sensor_schema(
+        cv.Optional(CONF_WIND_GUST): sensor.sensor_schema(
             unit_of_measurement=UNIT_METER_PER_SECOND,
             accuracy_decimals=1,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_WIND_SPEED): _numeric_sensor_schema(
+        cv.Optional(CONF_WIND_SPEED): sensor.sensor_schema(
             unit_of_measurement=UNIT_METER_PER_SECOND,
             accuracy_decimals=1,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_WIND_DIRECTION): _numeric_sensor_schema(
+        cv.Optional(CONF_WIND_DIRECTION): sensor.sensor_schema(
             unit_of_measurement=UNIT_DEGREES,
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_RAIN): _numeric_sensor_schema(
+        cv.Optional(CONF_RAIN): sensor.sensor_schema(
             unit_of_measurement=UNIT_MILLIMETER,
             accuracy_decimals=1,
             state_class=STATE_CLASS_TOTAL_INCREASING,
         ),
-        cv.Optional(CONF_UV): _numeric_sensor_schema(
+        cv.Optional(CONF_UV): sensor.sensor_schema(
             accuracy_decimals=1,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_LIGHT): _numeric_sensor_schema(
+        cv.Optional(CONF_LIGHT): sensor.sensor_schema(
             unit_of_measurement=UNIT_KILOLUX,
             accuracy_decimals=1,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_RSSI): _numeric_sensor_schema(
+        cv.Optional(CONF_RSSI): sensor.sensor_schema(
             unit_of_measurement=UNIT_DBM,
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_SIGNAL_STRENGTH,
@@ -188,13 +175,13 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_FILTER_SENSOR_ID): cv.hex_uint32_t,
 
         # ── Pool / Spa Thermometer sensors (PN 7000073) ───────────────────────
-        cv.Optional(CONF_WATER_TEMPERATURE): _numeric_sensor_schema(
+        cv.Optional(CONF_WATER_TEMPERATURE): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_POOL_RSSI): _numeric_sensor_schema(
+        cv.Optional(CONF_POOL_RSSI): sensor.sensor_schema(
             unit_of_measurement=UNIT_DBM,
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_SIGNAL_STRENGTH,
