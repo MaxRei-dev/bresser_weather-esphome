@@ -77,15 +77,23 @@ RADIO_TYPES = {
 # Alle unterstützten Radios werden von RadioLib über SPI angesprochen.
 _SPI_PIN_KEYS = (CONF_SCK_PIN, CONF_MISO_PIN, CONF_MOSI_PIN)
 
+# CC1101 sitzt im dokumentierten Setup auf den ESP32-Default-SPI-Pins
+# (VSPI 18/19/23) bzw. wird über den ESPHome 'spi:'-Block versorgt – dort sind
+# sck/miso/mosi optional. Die RadioLib-Radios (SX/LR) sitzen auf Boards wie dem
+# Heltec V4 auf abweichenden Pins und MÜSSEN sie explizit übergeben bekommen,
+# weil RadioLib die Pins NICHT aus dem ESPHome 'spi:'-Block übernimmt.
+_RADIOS_REQUIRING_SPI_PINS = ("sx1262", "sx1276", "lr1121")
+
 
 def _validate_spi_pins(config):
-    """RadioLib übernimmt die SPI-Pins NICHT aus dem ESPHome 'spi:'-Block.
-    Fehlen sie, greift RadioLib auf (oft falsche) Default-Pins zurück und der
-    Radio-Init hängt erst zur Laufzeit. Daher hier schon zur Compile-Zeit prüfen.
+    """Fehlen die SPI-Pins, greift RadioLib auf (oft falsche) Default-Pins
+    zurück und der Radio-Init hängt erst zur Laufzeit. Für Radios, die nicht auf
+    den Default-SPI-Pins sitzen, daher schon zur Compile-Zeit prüfen. CC1101 ist
+    ausgenommen – es läuft auf den Default-Pins bzw. dem ESPHome 'spi:'-Block.
     """
     pin_config = config[CONF_PINS]
     missing = [k for k in _SPI_PIN_KEYS if k not in pin_config]
-    if missing and config[CONF_RADIO] in RADIO_TYPES:
+    if missing and config[CONF_RADIO] in _RADIOS_REQUIRING_SPI_PINS:
         raise cv.Invalid(
             f"Das Radio '{config[CONF_RADIO]}' wird von RadioLib über SPI angesprochen, "
             f"aber RadioLib übernimmt die Pins NICHT aus dem ESPHome 'spi:'-Block. "

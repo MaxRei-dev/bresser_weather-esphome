@@ -1,6 +1,6 @@
 # ESPHome Bresser Weather Sensor Component
 
-ESPHome component for Bresser weather sensors and the Bresser Pool / Spa Thermometer (PN 7000073) using a CC1101 868 MHz radio module.
+ESPHome component for Bresser weather sensors and the Bresser Pool / Spa Thermometer (PN 7000073) using an 868 MHz radio module. Supported radios: **CC1101**, **SX1262**, **SX1276/RFM95W** and **LR1121** (all driven via the RadioLib-based BresserWeatherSensorReceiver library).
 
 This project is made possible by the excellent [BresserWeatherSensorReceiver](https://github.com/matthias-bs/BresserWeatherSensorReceiver/tree/main) library by Matthias Prinke. All credit for sensor decoding and radio communication belongs to that project.
 
@@ -8,10 +8,11 @@ This project is made possible by the excellent [BresserWeatherSensorReceiver](ht
 
 ## Tested Hardware
 
-| Microcontroller | Radio Module   | Sensor                                      |
-| --------------- | -------------- | ------------------------------------------- |
-| ESP32           | CC1101 868 MHz | Bresser 7-in-1 (7003100)                    |
-| ESP32           | CC1101 868 MHz | Bresser 7-in-1 + Pool Thermometer (7000073) |
+| Microcontroller                     | Radio Module           | Sensor                                      |
+| ----------------------------------- | ---------------------- | ------------------------------------------- |
+| ESP32                               | CC1101 868 MHz         | Bresser 7-in-1 (7003100)                    |
+| ESP32                               | CC1101 868 MHz         | Bresser 7-in-1 + Pool Thermometer (7000073) |
+| ESP32-S3 (Heltec WiFi LoRa 32 V4)   | Onboard SX1262 868 MHz | Bresser 7-in-1 (7003100)                    |
 
 ## Features
 
@@ -37,12 +38,27 @@ This project is made possible by the excellent [BresserWeatherSensorReceiver](ht
 
 > **Important**: CC1101 requires **3.3V** — not 5V.
 
+### Heltec WiFi LoRa 32 V4 (onboard SX1262)
+
+The SX1262 is already wired on-board; you only map the pins in the config. See [`example_heltec_v4_basic.yaml`](example_heltec_v4_basic.yaml) for a full working config (incl. OLED).
+
+| SX1262 signal | GPIO | `bresser_weather` pin |
+| ------------- | ---- | --------------------- |
+| NSS           | 8    | `cs`                  |
+| DIO1          | 14   | `irq`                 |
+| BUSY          | 13   | `gpio`                |
+| RST           | 12   | `rst`                 |
+| SCK           | 9    | `sck`                 |
+| MISO          | 11   | `miso`                |
+| MOSI          | 10   | `mosi`                |
+
+> **Do not add an ESPHome `spi:` block for the SX1262.** RadioLib uses the global Arduino SPI object, not ESPHome's SPI component — an `spi:` block would claim the same pins via the ESP-IDF driver and conflict. Pass the bus pins under `pins:` (`sck`/`miso`/`mosi`) instead; the component initializes Arduino SPI on them. The Heltec V4 also needs `-DARDUINO_HELTEC_WIFI_LORA_32_V4` as a build flag (see the example) so the library configures the TCXO and RF front-end.
+
 ## Installation
 
 ```yaml
 external_components:
   - source: github://MaxRei-dev/bresser_weather-esphome@main
-    refresh: 0s
     components: [bresser_weather]
 ```
 
@@ -50,13 +66,23 @@ external_components:
 
 ### Required options
 
-| Key         | Description                                    |
-| ----------- | ---------------------------------------------- |
-| `radio`     | Radio chip — use `cc1101`                      |
-| `pins.cs`   | SPI chip select GPIO                           |
-| `pins.irq`  | Interrupt / GD0 GPIO                           |
-| `pins.gpio` | GD2 GPIO                                       |
-| `pins.rst`  | Reset GPIO — use `-1` if not connected         |
+| Key         | Description                                                            |
+| ----------- | --------------------------------------------------------------------- |
+| `radio`     | Radio chip — one of `cc1101`, `sx1262`, `sx1276`, `lr1121`             |
+| `pins.cs`   | SPI chip select / NSS GPIO                                             |
+| `pins.irq`  | Interrupt GPIO (CC1101: GD0 · SX1262: DIO1)                            |
+| `pins.gpio` | Second radio GPIO (CC1101: GD2 · SX1262: BUSY)                         |
+| `pins.rst`  | Reset GPIO — use `-1` if not connected                                 |
+
+### Optional SPI bus pins
+
+| Key         | Description                                                            |
+| ----------- | --------------------------------------------------------------------- |
+| `pins.sck`  | SPI clock GPIO                                                         |
+| `pins.miso` | SPI MISO GPIO                                                          |
+| `pins.mosi` | SPI MOSI GPIO                                                          |
+
+RadioLib does **not** read SPI pins from the ESPHome `spi:` block. For **CC1101** on the default ESP32 VSPI pins (18/19/23) you can omit `sck`/`miso`/`mosi`. For **SX1262 / SX1276 / LR1121** (e.g. Heltec V4) the pins are non-default and **required** — the component will refuse to compile without them.
 
 ### Full example
 
